@@ -14,12 +14,33 @@ The **x8910** is a fully synchronous Verilog implementation of the General Instr
 
 ### Features
 
+<small>
+
 - **Fully Synchronous Design**: All state changes occur on the positive edge of `clk` when `cen` is active. No latches or asynchronous logic.
 - **Three Tone Channels**: 12-bit period square wave generators (A, B, C).
 - **Pseudo-Random Noise**: 17-bit LFSR with 5-bit period counter and zero-detect feedback.
 - **Envelope Generator**: 16-bit period, 4-bit amplitude counter, 10 shape configurations.
 - **Logarithmic D/A**: 10-bit resolution with sqrt(2) voltage steps per GI datasheet.
 - **Register Compatible**: 16-register file with proper bit masking on read.
+
+</small>
+
+## Table of Contents
+
+| # | Section | Description |
+|---|---------|-------------|
+| 1 | [System Architecture](#system-architecture) | Top-level block diagram of the register file, three tone channels, noise generator, envelope, mixer, and DAC |
+| 2 | [Module Hierarchy](#module-hierarchy) | Source-file listing with each module's role and approximate line count |
+| 3 | [Register Map](#register-map) | R0-R15 layout with detailed bit-field decode for the Mixer Control (R7), Amplitude (R8-R10), and Envelope Shape (R13) registers |
+| 4 | [Internal Clock Division](#internal-clock-division) | Master clock divider tree and the per-block tone / noise / envelope frequency formulas |
+| 5 | [D/A Converter](#da-converter) | Logarithmic 10-bit volume curve with sqrt(2) voltage steps per GI datasheet |
+| 6 | [Design Usage](#design-usage) | Instantiation template and the address-then-data bus write / read protocol |
+| 7 | [Design Verification](#design-verification) | Testbench section breakdown, run command, ModelSim screenshot, and final summary box. Per-test log: [tb_x8910](doc/readme/tb_x8910_log.md). |
+| 8 | [VGM Playback](#vgm-playback) | Agnostic VGM playback testbench for validating the PSG against captured arcade audio, plus the VGZ-to-WAV toolchain |
+| 9 | [Project Structure](#project-structure) | Directory tree of the IP package |
+| 10 | [Design References](#design-references) | Hardware manuals and datasheets used as the implementation reference |
+| 11 | [License](#license) | Creative Commons Attribution-NonCommercial 4.0 International |
+| 12 | [Support](#support) | Back ongoing Coin-Op Collection FPGA core development on Patreon |
 
 ## System Architecture
 
@@ -170,15 +191,15 @@ Logarithmic volume curve with sqrt(2) steps per GI datasheet (Section 3.7):
 
 ```verilog
 x8910 u_psg (
-    .clk    ( clk_sys   ),  // System clock
-    .cen    ( psg_cen   ),  // Clock enable at PSG input rate
-    .reset  ( reset     ),  // Synchronous reset
-    .a0     ( psg_a0    ),  // Address/data select
-    .wr     ( psg_wr    ),  // Write enable
-    .rd     ( psg_rd    ),  // Read enable
-    .din    ( psg_din   ),  // Data bus input
-    .dout   ( psg_dout  ),  // Data bus output
-    .sndout ( psg_audio )   // 8-bit unsigned audio output
+    .clk    ( clk_sys   ), // System clock
+    .cen    ( psg_cen   ), // Clock enable at PSG input rate
+    .reset  ( reset     ), // Synchronous reset
+    .a0     ( psg_a0    ), // Address/data select
+    .wr     ( psg_wr    ), // Write enable
+    .rd     ( psg_rd    ), // Read enable
+    .din    ( psg_din   ), // Data bus input
+    .dout   ( psg_dout  ), // Data bus output
+    .sndout ( psg_audio )  // 8-bit unsigned audio output
 );
 ```
 
@@ -196,7 +217,9 @@ Register Read:
 
 ## Design Verification
 
-The testbench (`tb_x8910.v`) provides comprehensive verification:
+The testbench (`tb_x8910.v`) provides comprehensive verification across 8 sections covering the register bus, tone / noise / envelope generators, mixer, DAC, and write-while-active behaviour:
+
+<small>
 
 - **Register Protocol**: Latch, write, read, and bit masking for all register types
 - **Tone Generation**: Period configuration and toggle verification for all 3 channels
@@ -206,12 +229,12 @@ The testbench (`tb_x8910.v`) provides comprehensive verification:
 - **Envelope Generator**: Shape configuration, hold behavior, and restart
 - **Master Output**: Channel summing and output range verification
 
+</small>
+
 ```
 vlog tb_x8910.v ../hdl/*.v
 vsim -c tb_x8910 -do "run -all"
 ```
-
-### Simulation Results (ModelSim SE-64 10.7)
 
 <table align="center">
   <tr>
@@ -223,94 +246,6 @@ vsim -c tb_x8910 -do "run -all"
 
 ```
 =============================================================
-  AY-3-8910 Comprehensive PSG Testbench
-  Reference: GI AY-3-8910/8912 PSG Data Manual
-=============================================================
-
-=== SECTION 1: Register Bus Protocol ===
-
-PASS: R0 write/read = $AB = 000000ab
-PASS: R1 read mask [3:0] = 0000000f
-PASS: R3 read mask [3:0] = 0000000f
-PASS: R5 read mask [3:0] = 0000000f
-PASS: R6 read mask [4:0] = 0000001f
-PASS: R7 write/read = $A5 = 000000a5
-PASS: R8 read mask [4:0] = 0000001f
-PASS: R9 read mask [4:0] = 0000001f
-PASS: R10 read mask [4:0] = 0000001f
-PASS: R13 read mask [3:0] = 0000000f
-PASS: R7 reset default = $FF = 000000ff
-PASS: R0 reset default = $00 = 00000000
-
-=== SECTION 2: Tone Generator ===
-
-PASS: Tone A toggling (period=1) = 00000001
-PASS: Tone B toggling (period=2) = 00000001
-PASS: Tone C toggling (period=4) = 00000001
-PASS: Period 1 faster than period 4 = 00000001
-PASS: Period 0 produces output = 00000001
-
-=== SECTION 3: Noise Generator ===
-
-PASS: LFSR active (non-zero) = 00000001
-PASS: Noise output changing = 00000001
-PASS: Noise: period 1 faster than 16 = 00000001
-
-=== SECTION 4: Mixer Logic ===
-
-PASS: Mixer: both dis -> bypass = 00000001
-PASS: Mixer: tone only -> active = 00000001
-PASS: Mixer: noise only -> active = 00000001
-PASS: Mixer: tone+noise -> active = 00000001
-PASS: Mixer: all amp=0 -> silence = 00000000
-
-=== SECTION 5: Amplitude Control ===
-
-PASS: DAC: A=15 -> 63 = 0000003f
-PASS: DAC: B=15 -> 63 = 0000003f
-PASS: DAC: C=15 -> 63 = 0000003f
-PASS: DAC: all off -> 0 = 00000000
-PASS: DAC: level 11 -> 16 = 00000010
-PASS: DAC: level 7 -> 4 = 00000004
-PASS: DAC: level 1 -> 0 = 00000000
-
-=== SECTION 6: Envelope Generator ===
-
-PASS: Shape $00: stopped = 00000001
-PASS: Shape $00: held at 0 = 00000000
-PASS: Shape $04: stopped = 00000001
-PASS: Shape $08: repeating (output changes) = 00000001
-PASS: Shape $09: hold stopped = 00000001
-PASS: Shape $0A: alternating (output changes) = 00000001
-PASS: Shape $0B: hold stopped = 00000001
-PASS: Shape $0B: held at max = 0000000f
-PASS: Shape $0C: attack (invert=0) = 00000000
-PASS: Shape $0C: not stopped (repeat) = 00000000
-PASS: Shape $0D: hold stopped = 00000001
-PASS: Shape $0D: held at max = 0000000f
-PASS: Shape $0E: alternating (output changes) = 00000001
-PASS: Shape $0F: hold stopped = 00000001
-PASS: Shape $0F: held at 0 = 00000000
-PASS: Restart: stopped before = 00000001
-PASS: Restart: clears stop = 00000000
-PASS: Slow period: counter < 8 = 00000001
-
-=== SECTION 7: Master Output ===
-
-PASS: 3ch max -> 191 = 000000bf
-PASS: All off -> 0 = 00000000
-PASS: A only -> 63 = 0000003f
-PASS: B only -> 63 = 0000003f
-PASS: C only -> 63 = 0000003f
-PASS: A+B -> 127 = 0000007f
-
-=== SECTION 8: Write-While-Active ===
-
-PASS: Amp change while active = 00000001
-PASS: Period change while active = 00000001
-PASS: Env switch while active = 00000000
-
-=============================================================
   AY-3-8910 Comprehensive Test Results
 =============================================================
   Total Tests:  59
@@ -320,6 +255,8 @@ PASS: Env switch while active = 00000000
   *** ALL TESTS PASSED ***
 =============================================================
 ```
+
+Per-test output: [tb_x8910](doc/readme/tb_x8910_log.md)
 
 ## VGM Playback
 
@@ -365,8 +302,10 @@ WAV files are written to `sim/output/wav/` with names derived from the source VG
 
 ```
 x8910/
-├── README.md                 # This file
-├── x8910.qip                 # Quartus project include file
+├── doc/
+│   ├── 00_GI_AY-3-8910_Datasheet.pdf
+│   ├── 01_AY-3-8910_8912_Programmable_Sound_Generator_Data_Manual.pdf
+│   └── 02_AY-3-8910_RE_Schematic.pdf
 ├── hdl/
 │   ├── x8910.v               # Top-level PSG (registers, mixer, DAC)
 │   ├── x8910_tone.v          # Tone generator
@@ -383,10 +322,7 @@ x8910/
 │       ├── vgm/              # User-supplied VGZ/VGM files
 │       ├── vgm_hex/          # Generated playlist and tracklist
 │       └── wav/              # Generated WAV files
-└── doc/
-    ├── 00_GI_AY-3-8910_Datasheet.pdf
-    ├── 01_AY-3-8910_8912_Programmable_Sound_Generator_Data_Manual.pdf
-    └── 02_AY-3-8910_RE_Schematic.pdf
+└── x8910.qip                 # Quartus project include file
 ```
 
 ## Design References
