@@ -18,12 +18,14 @@ Verified Verilog IP modules for FPGA-based applications. Each module targets cyc
 
 | Module | Device | Description |
 |--------|--------|-------------|
+| [x6502](cpu/x6502/) | MOS Technology 6502 | NMOS 8-bit Microprocessor |
 | [x68705](cpu/x68705/) | Motorola MC68705P3 | M6805 based 8-bit EPROM MCU |
 
 ### Sound
 
 | Module | Device | Description |
 |--------|--------|-------------|
+| [x76489](sound/x76489/) | Texas Instruments SN76489AN | Digital Complex Sound Generator |
 | [x8910](sound/x8910/) | General Instrument AY-3-8910 | Programmable Sound Generator |
 
 ## Design Principles
