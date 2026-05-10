@@ -19,6 +19,7 @@ Verified Verilog IP modules for FPGA-based applications. Each module targets cyc
 | Module | Device | Description |
 |--------|--------|-------------|
 | [x6502](cpu/x6502/) | MOS Technology 6502 | NMOS 8-bit Microprocessor |
+| [x65c02](cpu/x65c02/) | Rockwell R65C02 | CMOS 8-bit Microprocessor |
 | [x68705](cpu/x68705/) | Motorola MC68705P3 | M6805 based 8-bit EPROM MCU |
 
 ### Sound
