@@ -13,29 +13,34 @@
 */
 
 //============================================================================
-//  Single-cycle rising edge detector for the SN76489AN implementation.
+//  Rising edge detector for the Texas Instruments SN76489AN noise
+//  generator: rise is high for one clk when sig is high and was low on the
+//  clk before. The noise shift register shifts on each rising edge of its
+//  selected shift-rate source.
 //
-//  Generates a one-clock-cycle pulse on the rising edge of the input
-//  signal. Used by the noise generator to trigger LFSR shifts on the
-//  rising edge of the selected shift rate source.
+//  Reference: TI SN76489AN Data Sheet, Advanced Circuits, November 1981,
+//             Figure 4 [p.11].
 //============================================================================
 
+`timescale 1ns/1ps
+
 module x76489_edge (
+    // Clock and Reset
     input  wire clk,
-    input  wire reset,
-    input  wire signal_in,
-    output wire on_posedge
+    input  wire rst,
+
+    // Edge Interface
+    input  wire sig,
+    output wire rise
 );
 
 reg prev;
 
 always @(posedge clk) begin
-    if(reset)
-        prev <= 1'b0;
-    else
-        prev <= signal_in;
+    if(rst) prev <= 1'b0;
+    else prev <= sig;
 end
 
-assign on_posedge = (prev != signal_in) & signal_in;
+assign rise = sig & ~prev;
 
 endmodule

@@ -1,26 +1,27 @@
 #!/usr/bin/env python3
 """
-Convert all VGZ/VGM files in output/vgm/ to a single combined playlist
-hex file for the x76489 VGM playback testbench.
+Convert all VGZ/VGM files in sim/output/vgm/ to a single combined playlist
+hex file for the x76489 (TI SN76489AN) VGM playback testbench.
 
 Usage:
-    python scripts/vgm2hex.py
+    python sim/scripts/vgm2hex.py            (run from the x76489 IP root)
 
 Output:
-    output/vgm_hex/playlist.hex  - Combined hex command file
-    output/vgm_hex/tracklist.txt - Track index (number -> name mapping)
+    sim/output/vgm_hex/playlist.hex   - combined hex command stream
+    sim/output/vgm_hex/tracklist.txt  - track index (number -> name mapping)
 
 Playlist format (32-bit hex words for $readmemh):
-    3_CC_CC_CC  = Track start marker, lower 24 bits = CEN ticks per sample
-    1_00_00_DD  = Write data byte DD to SN76489
+    3_CC_CC_CC  = Track start marker, lower 28 bits = chip clock / 44100
+                  (81, 3.58 MHz, when the header gives no clock)
+    1_00_00_DD  = Write the byte DD
     2_WW_WW_WW  = Wait WWWWWW samples (at 44100 Hz)
     0_00_00_00  = End of track
     F_00_00_00  = End of playlist
 
-The SN76489 uses VGM command 0x50 (single data byte write).
-
-Reference: VGM file format specification
-           TI SN76489AN Datasheet
+VGM commands consumed (file format spec 1.71):
+    0x50 dd     SN76489 write dd (clock at header offset 0x0C)
+    0x61 nn nn  wait nn samples     0x62 wait 735   0x63 wait 882
+    0x70-0x7F   wait (n&0xF)+1 samples              0x66 end of data
 """
 
 import sys
@@ -28,6 +29,12 @@ import gzip
 import struct
 import os
 import glob
+
+# Resolve I/O directories relative to this script so the CWD does not matter.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SIM_DIR    = os.path.dirname(SCRIPT_DIR)
+VGM_DIR    = os.path.join(SIM_DIR, "output", "vgm")
+HEX_DIR    = os.path.join(SIM_DIR, "output", "vgm_hex")
 
 
 def parse_vgm(data):
@@ -100,22 +107,20 @@ def parse_vgm(data):
 
 
 def main():
-    vgm_dir = "output/vgm"
-    hex_dir = "output/vgm_hex"
-    playlist_file = os.path.join(hex_dir, "playlist.hex")
-    tracklist_file = os.path.join(hex_dir, "tracklist.txt")
+    playlist_file = os.path.join(HEX_DIR, "playlist.hex")
+    tracklist_file = os.path.join(HEX_DIR, "tracklist.txt")
 
-    os.makedirs(hex_dir, exist_ok=True)
+    os.makedirs(HEX_DIR, exist_ok=True)
 
-    vgz_files = sorted(glob.glob(os.path.join(vgm_dir, "*.vgz")))
-    vgm_files = sorted(glob.glob(os.path.join(vgm_dir, "*.vgm")))
+    vgz_files = sorted(glob.glob(os.path.join(VGM_DIR, "*.vgz")))
+    vgm_files = sorted(glob.glob(os.path.join(VGM_DIR, "*.vgm")))
     all_files = sorted(vgz_files + vgm_files)
 
     if not all_files:
-        print(f"No VGZ/VGM files found in {vgm_dir}/")
+        print(f"No VGZ/VGM files found in {VGM_DIR}/")
         sys.exit(1)
 
-    print(f"Found {len(all_files)} tracks in {vgm_dir}/\n")
+    print(f"Found {len(all_files)} track(s) in {VGM_DIR}/\n")
 
     total_commands = 0
     track_entries = []
@@ -179,7 +184,7 @@ def main():
             tf.write(f"{track_num:02d} {name} {duration:.2f} {clock}\n")
 
     print(f"\nPlaylist: {playlist_file} ({total_commands:,} commands)")
-    print(f"Tracklist: {tracklist_file} ({len(track_entries)} tracks)")
+    print(f"Tracklist: {tracklist_file} ({len(track_entries)} track(s))")
     print(f"Total duration: {sum(e[2] for e in track_entries):.1f} seconds")
 
 

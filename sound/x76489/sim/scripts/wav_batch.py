@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """
-Batch convert raw PCM files from VGM testbench to named WAV files.
+Batch convert raw unsigned 8-bit mono PCM files from the x76489 (TI
+SN76489AN) VGM testbench to named 8-bit mono WAV files.
 
 Usage:
-    python scripts/wav_batch.py
+    python sim/scripts/wav_batch.py          (run from the x76489 IP root)
 
-Reads track_NN.raw files from output/wav/, uses output/vgm_hex/tracklist.txt
-to map track numbers to song names, and writes named WAV files. Raw files
-are deleted after successful conversion. A 512-sample fade to center is
-applied at the end of each track to prevent end-of-file pops.
+Reads track_NN.raw files from sim/output/wav/, uses
+sim/output/vgm_hex/tracklist.txt to map track numbers to song names, and
+writes named WAV files. Raw files are deleted after successful conversion.
+The last FADE_LEN samples are faded linearly to 128, the WAV center, to
+prevent an end-of-file pop.
+
+Raw stream format (per sample, 1 byte):
+    AOUT   (8-bit unsigned, mono mix)
+
+WAV output: 44100 Hz, 8-bit PCM, mono.
 """
 
 import wave
@@ -16,9 +23,11 @@ import os
 import glob
 
 SAMPLE_RATE = 44100
-WAV_DIR = "output/wav"
-TRACKLIST = "output/vgm_hex/tracklist.txt"
-FADE_LEN = 512
+SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
+SIM_DIR     = os.path.dirname(SCRIPT_DIR)
+WAV_DIR     = os.path.join(SIM_DIR, "output", "wav")
+TRACKLIST   = os.path.join(SIM_DIR, "output", "vgm_hex", "tracklist.txt")
+FADE_LEN    = 512
 
 
 def load_tracklist():
@@ -45,7 +54,7 @@ def main():
 
     tracklist = load_tracklist()
 
-    print(f"Converting {len(raw_files)} tracks at {SAMPLE_RATE} Hz")
+    print(f"Converting {len(raw_files)} track(s) at {SAMPLE_RATE} Hz")
     if tracklist:
         print(f"Using tracklist: {TRACKLIST}\n")
     else:

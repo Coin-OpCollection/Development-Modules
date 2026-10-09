@@ -13,105 +13,107 @@
 */
 
 //============================================================================
-//  Noise generator module for the SN76489AN Complex Sound Generator.
+//  Noise generator for the Texas Instruments SN76489AN digital complex
+//  sound generator: a 15-stage shift register shifted at one of four
+//  rates, giving white noise (FB = 1) or periodic noise (FB = 0) (Tables
+//  2 and 3 [p.3]). ctrl is {FB, NF0, NF1}.
 //
-//  Implements a 15-bit Linear Feedback Shift Register (LFSR) with
-//  configurable feedback and selectable shift rate. The LFSR produces
-//  either periodic or white noise depending on the feedback mode.
+//  Shift Rate:
+//    counter steps on pre_cen (N/16); its bits 4, 5 and 6 give N/512,
+//    N/1024 and N/2048 for NF0, NF1 = 00, 01 and 10, and 11 takes the tone
+//    3 output (Table 3 [p.3], Figure 4 [p.11]). The register shifts on
+//    each rising edge of the selected source.
 //
-//  Reference TI SN76489AN datasheet, Section 2 and Figure 4:
-//    - 15-bit LFSR with configurable feedback taps
-//    - Default taps (0,1) match SN76489AN / SG-1000 / Colecovision
-//    - Shift rate derived from master_clock/16, then further divided:
-//        NF=00: /32  (N/512 total)    NF=01: /64  (N/1024 total)
-//        NF=10: /128 (N/2048 total)   NF=11: Tone Generator #3 output
-//    - White noise (FB=1): XOR feedback prevents lock-up
-//    - Periodic noise (FB=0): Direct feedback, produces regular pattern
-//    - LFSR reset to 100...0 whenever noise control register is written
+//  Shift Register:
+//    lfsr shifts toward bit 0, and out is bit 0, the last stage. With FB =
+//    1 the stage shifted in is the XOR of the last two stages, bits 0 and
+//    1. restart, a latch byte to the noise control register, and reset
+//    reseed lfsr to 100...0, one stage opposite to the other fourteen; the
+//    data sheet calls this clearing the register [p.3]. With FB = 0 the
+//    register rotates, so the seed returns every 15 shifts. The die
+//    shifts a constant in and reseeds from a detector on all 15 stages,
+//    which gives the same 15-shift period.
+//
+//  The register length is from the TI-99/4A Servicing Manual (Noise
+//  Generator, p. 74) and the die; the taps, the seed and the periodic mode
+//  are from the die (TI SN76489AN die schematic, NOISE).
+//
+//  Parameters:
+//    LFSR_BITS - register length, 15
+//    LFSR_TAP0 - first feedback tap, 0 (the last stage)
+//    LFSR_TAP1 - second feedback tap, 1
+//
+//  Reference: TI SN76489AN Data Sheet, Advanced Circuits, November 1981,
+//             Noise Generator, Tables 2 and 3 [p.2-3], Figure 4 [p.11].
+//             TI-99/4A Servicing Manual, Sound Generation Controller,
+//             p. 74.
+//             TI SN76489AN die schematic, NOISE.
 //============================================================================
+
+`timescale 1ns/1ps
 
 module x76489_noise #(
     parameter LFSR_BITS = 15,
     parameter LFSR_TAP0 = 0,
     parameter LFSR_TAP1 = 1
-) (
+)(
+    // Clock and Reset
     input  wire       clk,
-    input  wire       enable,
-    input  wire       reset,
-    input  wire       restart_noise,
-    input  wire [2:0] control,        // {FB, NF0, NF1}
-    input  wire       driven_by_tone,
+    input  wire       rst,
+    input  wire       pre_cen,
+
+    // Noise Interface
+    input  wire       restart,
+    input  wire [2:0] ctrl,
+    input  wire       tone3,
     output wire       out
 );
 
-//------------------------------------------------------------------------
-// Noise Type Select (Table 2):
-// FB=0: periodic noise (direct feedback from bit 0)
-// FB=1: white noise (XOR feedback from tapped bits)
-//------------------------------------------------------------------------
-wire is_white_noise = control[2];
-
-//------------------------------------------------------------------------
-// Shift Rate Counter (Table 3):
-// Internal counter provides fixed shift rates after /16 prescaler.
-// counter[4]=/32, counter[5]=/64, counter[6]=/128
-//------------------------------------------------------------------------
+//========================================================================
+// Shift Rate:
+//========================================================================
 reg [6:0] counter;
 
 always @(posedge clk) begin
-    if(reset)
-        counter <= 7'd0;
-    else if(enable)
-        counter <= counter + 7'd1;
+    if(rst) counter <= 7'd0;
+    else if(pre_cen) counter <= counter + 7'd1;
 end
 
-//------------------------------------------------------------------------
-// Shift Rate Source Selection (Table 3):
-// NF=00: N/512   NF=01: N/1024   NF=10: N/2048
-// NF=11: Driven by Tone Generator #3 output
-//------------------------------------------------------------------------
 reg trigger;
+
 always @(*) begin
-    case(control[1:0])
-        2'b00: trigger = counter[4];     // N/512
-        2'b01: trigger = counter[5];     // N/1024
-        2'b10: trigger = counter[6];     // N/2048
-        2'b11: trigger = driven_by_tone; // Tone channel 3
-        default: trigger = counter[4];
+    case(ctrl[1:0])
+        2'b00 : trigger = counter[4];
+        2'b01 : trigger = counter[5];
+        2'b10 : trigger = counter[6];
+        2'b11 : trigger = tone3;
+        default : trigger = counter[4];
     endcase
 end
 
-//------------------------------------------------------------------------
-// Trigger Edge Detection:
-// LFSR shifts on rising edge of selected shift rate source.
-//------------------------------------------------------------------------
-wire trigger_edge;
+wire shift;
 
 x76489_edge u_edge (
-    .clk        ( clk          ),
-    .reset      ( reset        ),
-    .signal_in  ( trigger      ),
-    .on_posedge ( trigger_edge )
+    // Clock and Reset
+    .clk  ( clk     ),
+    .rst  ( rst     ),
+
+    // Edge Interface
+    .sig  ( trigger ),
+    .rise ( shift   )
 );
 
-//------------------------------------------------------------------------
-// 15-bit LFSR:
-// Configurable feedback taps. White noise uses XOR of tapped bits.
-// Periodic noise uses direct feedback from tap 0. LFSR reset to
-// 100...0 on noise control register write (prevents zero lock-up).
-//------------------------------------------------------------------------
-wire reset_lfsr = reset | restart_noise;
-
+//========================================================================
+// Shift Register:
+//========================================================================
 reg [LFSR_BITS-1:0] lfsr;
 
 always @(posedge clk) begin
-    if(reset_lfsr)
-        lfsr <= 1'b1 << (LFSR_BITS - 1); // Reset to 100...0
-    else if(trigger_edge) begin
-        if(is_white_noise)
-            lfsr <= {lfsr[LFSR_TAP0] ^ lfsr[LFSR_TAP1], lfsr[LFSR_BITS-1:1]}; // XOR feedback
-        else
-            lfsr <= {lfsr[LFSR_TAP0], lfsr[LFSR_BITS-1:1]}; // Direct feedback
+    if(rst || restart) begin
+        lfsr <= 1'b1 << (LFSR_BITS - 1);
+    end else if(shift) begin
+        if(ctrl[2]) lfsr <= {lfsr[LFSR_TAP0] ^ lfsr[LFSR_TAP1], lfsr[LFSR_BITS-1:1]};
+        else lfsr <= {lfsr[LFSR_TAP0], lfsr[LFSR_BITS-1:1]};
     end
 end
 
