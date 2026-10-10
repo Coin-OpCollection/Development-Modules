@@ -42,7 +42,9 @@
 //             M6805/M146805 CMOS Family User's Manual, Second Edition
 //============================================================================
 
-module x68705_mcu (
+module x68705_mcu #(
+    parameter HMOS = 0
+)(
     input  wire        clk,
     input  wire        rst,
     input  wire        cen, // Active High
@@ -113,7 +115,9 @@ end
 //   - 8-bit timer with 7-bit prescaler
 // The MOR value controls timer behavior per MC68705P3 datasheet.
 //------------------------------------------------------------------------
-x68705 u_core (
+x68705 #(
+    .HMOS ( HMOS )
+) u_core (
     .clk      ( clk           ),
     .rst      ( rst           ),
     .cen      ( cen           ),

@@ -43,9 +43,14 @@
 //    Section 12: Interrupt Instructions (SWI, RTI)
 //    Section 13: Control Instructions (NOP, RSP, TAX, TXA, CLC, SEC, etc.)
 //
-//  Cycle Timing (M146805 CMOS):
-//    All timings are for CMOS version per User's Manual. HMOS timings
-//    are typically 1-2 cycles longer for most instructions.
+//  Cycle Timing:
+//    HMOS = 0 gives the M146805 CMOS cycle counts of the User's Manual
+//    opcode map. HMOS = 1 gives the M6805 HMOS counts of the same map and
+//    of the MC68705P3/P5 data sheets, the family the MC68705 belongs to:
+//    after the opcode decode the state machine holds for the number of
+//    machine cycles by which the HMOS count exceeds the CMOS count (0-5).
+//    The hardware interrupt entry holds for 1 or 2, for the 10-cycle CMOS
+//    and 11-cycle HMOS sequences of Appendix G, Tables G1 and G2.
 //
 //  State Machine Design:
 //    The CPU uses a multi-cycle state machine where each state represents
@@ -57,7 +62,9 @@
 //             M6805/M146805 CMOS Family User's Manual, Second Edition
 //============================================================================
 
-module x6805 (
+module x6805 #(
+    parameter HMOS = 0
+)(
     input  wire        clk,
     input  wire        rst,
     input  wire        cen,
@@ -402,6 +409,41 @@ wire [3:0] op_hi = opcode[7:4]; // High nibble determines addressing mode
 wire [3:0] op_lo = opcode[3:0]; // Low nibble determines operation
 
 //=========================================================================
+// Cycle Holds:
+// Machine cycles by which the M6805 HMOS count exceeds the M146805 CMOS
+// count, per opcode (User's Manual opcode map, HMOS/CMOS columns), and
+// the hold that brings the hardware interrupt entry to 10 CMOS or 11
+// HMOS cycles (Appendix G, Tables G1 and G2).
+//=========================================================================
+localparam [2:0] INT_HOLD = HMOS ? 3'd2 : 3'd1;
+
+function [2:0] hmos_extra;
+    input [7:0] op;
+    begin
+        casez(op)
+            8'h0?:   hmos_extra = 3'd5; // BRSET/BRCLR: 10/5
+            8'h1?:   hmos_extra = 3'd2; // BSET/BCLR: 7/5
+            8'h3D:   hmos_extra = 3'd2; // TST dir: 6/4
+            8'h6D:   hmos_extra = 3'd2; // TST ix1: 7/5
+            8'h7D:   hmos_extra = 3'd2; // TST ix: 6/4
+            8'hAD:   hmos_extra = 3'd2; // BSR: 8/6
+            8'hBD:   hmos_extra = 3'd2; // JSR dir: 7/5
+            8'hCD:   hmos_extra = 3'd2; // JSR ext: 8/6
+            8'hDD:   hmos_extra = 3'd2; // JSR ix2: 9/7
+            8'hED:   hmos_extra = 3'd2; // JSR ix1: 8/6
+            8'hFD:   hmos_extra = 3'd2; // JSR ix: 7/5
+            8'h80:   hmos_extra = 3'd0; // RTI: 9/9
+            8'h81:   hmos_extra = 3'd0; // RTS: 6/6
+            8'h9?:   hmos_extra = 3'd0; // Inherent control: 2/2
+            8'hA?:   hmos_extra = 3'd0; // Immediate: 2/2
+            default: hmos_extra = 3'd1; // Every other defined opcode
+        endcase
+    end
+endfunction
+
+reg [2:0] hold_cnt; // Remaining hold cycles
+
+//=========================================================================
 // Instruction Length Reference (bytes):
 //   1 byte:  Inherent, Indexed (no offset)
 //   2 bytes: Immediate, Direct, Indexed (8-bit), Relative, BSC
@@ -463,8 +505,21 @@ always @(posedge clk) begin
         // Interrupt acknowledge - not asserted
         irq_ack <= 1'b0;
 
+        // Cycle hold - none pending
+        hold_cnt <= 3'd0;
+
         // Begin reset sequence
         state <= ST_RESET;
+    end else if(cen && hold_cnt != 3'd0) begin
+        //=================================================================
+        // Cycle Hold:
+        // Extra machine cycles of the HMOS count or of the interrupt
+        // entry. The state machine holds and the bus is idle.
+        //=================================================================
+        hold_cnt <= hold_cnt - 3'd1;
+        rd <= 1'b0;
+        wr <= 1'b0;
+        irq_ack <= 1'b0;
     end else if(cen) begin
         //=================================================================
         // Clock Enable Active:
@@ -546,6 +601,7 @@ always @(posedge clk) begin
                     irq_ack <= 1'b1;
                     // Begin interrupt stacking sequence
                     // PC already points to next instruction (return address)
+                    hold_cnt <= INT_HOLD;
                     state <= ST_SWI_IDLE;
                 end else begin
                     //-----------------------------------------------------
@@ -555,6 +611,7 @@ always @(posedge clk) begin
                     //-----------------------------------------------------
                     opcode <= din;
                     reg_pc <= reg_pc + 1;
+                    hold_cnt <= HMOS ? hmos_extra(din) : 3'd0;
 
                     // Decode based on HIGH nibble (primary addressing mode)
                     case(din[7:4])

@@ -17,7 +17,7 @@ The **x68705** is a fully synchronous, cycle-accurate Verilog implementation of 
 <small>
 
 - **Fully Synchronous Design**: All state changes occur on the positive edge of `clk` when `cen` is active. No latches or asynchronous logic.
-- **Cycle-Accurate Timing**: Instruction timing matches M6805 CMOS Family User's Manual specifications.
+- **Cycle-Accurate Timing**: Instruction timing matches the M6805/M146805 User's Manual opcode map: the HMOS counts of the MC68705P3/P5 with `HMOS = 1`, the M146805 CMOS counts with `HMOS = 0`.
 - **Complete Instruction Set**: All 62 unique operations (202 valid opcodes) implemented across 10 addressing modes.
 - **Integrated Peripherals**: I/O ports, timer/counter, and internal RAM included.
 - **M6805 Family Compatible**: Core architecture shared across the M6805 family.
@@ -79,7 +79,7 @@ The **x68705** is a fully synchronous, cycle-accurate Verilog implementation of 
 |--------|-------------|-------|
 | `x68705_mcu.v` | Top-level MCU wrapper with MOR handling | ~135 |
 | `x68705.v` | Core integration (CPU, ALU, Memory, I/O, Timer) | ~245 |
-| `x6805.v` | Central processor with state machine | ~2050 |
+| `x6805.v` | Central processor with state machine | ~2110 |
 | `x6805_alu.v` | Combinational arithmetic logic unit | ~272 |
 | `x68705_io.v` | Parallel I/O ports with DDRs | ~158 |
 | `x68705_timer.v` | 8-bit timer with 7-bit prescaler | ~245 |
@@ -162,89 +162,95 @@ $7F8-$7FF   Interrupt Vectors
 
 ### Instruction Timing
 
+Counts are machine cycles, written HMOS/CMOS. `HMOS = 1` gives the M6805 HMOS counts, the family the MC68705P3 and MC68705P5 belong to (MC68705P5 data sheet Tables 1-5). `HMOS = 0` gives the M146805 CMOS counts. Both columns come from the User's Manual opcode map, and Appendix G gives the cycle-by-cycle sequences (Table G1 CMOS, Table G2 HMOS).
+
+In HMOS mode the state machine holds, right after the opcode decode, for the number of machine cycles by which the HMOS count exceeds the CMOS count, 0 to 5, so every bus access keeps its position relative to the end of the instruction. The timer keeps counting through the hold.
+
+**CMOS compatibility:** `HMOS = 0` is the default and keeps the timing of earlier x68705 releases for every opcode. The one change is the hardware interrupt entry (external and timer), which now takes the 10 cycles of Appendix G Table G1; earlier releases took 9.
+
 #### Register/Memory Operations
 
 | Instruction | IMM | DIR | EXT | IX | IX1 | IX2 |
 |-------------|-----|-----|-----|-----|-----|-----|
-| LDA/LDX | 2 | 3 | 4 | 3 | 4 | 5 |
-| STA/STX | - | 4 | 5 | 4 | 5 | 6 |
-| ADD/ADC/SUB/SBC | 2 | 3 | 4 | 3 | 4 | 5 |
-| AND/ORA/EOR/BIT | 2 | 3 | 4 | 3 | 4 | 5 |
-| CMP/CPX | 2 | 3 | 4 | 3 | 4 | 5 |
+| LDA/LDX | 2/2 | 4/3 | 5/4 | 4/3 | 5/4 | 6/5 |
+| STA/STX | - | 5/4 | 6/5 | 5/4 | 6/5 | 7/6 |
+| ADD/ADC/SUB/SBC | 2/2 | 4/3 | 5/4 | 4/3 | 5/4 | 6/5 |
+| AND/ORA/EOR/BIT | 2/2 | 4/3 | 5/4 | 4/3 | 5/4 | 6/5 |
+| CMP/CPX | 2/2 | 4/3 | 5/4 | 4/3 | 5/4 | 6/5 |
 
 #### Read-Modify-Write Operations
 
 | Instruction | INH(A) | INH(X) | DIR | IX | IX1 |
 |-------------|--------|--------|-----|-----|-----|
-| INC/DEC | 3 | 3 | 5 | 5 | 6 |
-| NEG/COM/CLR | 3 | 3 | 5 | 5 | 6 |
-| LSR/ASR/LSL | 3 | 3 | 5 | 5 | 6 |
-| ROL/ROR | 3 | 3 | 5 | 5 | 6 |
-| TST | 3 | 3 | 4 | 4 | 5 |
+| INC/DEC | 4/3 | 4/3 | 6/5 | 6/5 | 7/6 |
+| NEG/COM/CLR | 4/3 | 4/3 | 6/5 | 6/5 | 7/6 |
+| LSR/ASR/LSL | 4/3 | 4/3 | 6/5 | 6/5 | 7/6 |
+| ROL/ROR | 4/3 | 4/3 | 6/5 | 6/5 | 7/6 |
+| TST | 4/3 | 4/3 | 6/4 | 6/4 | 7/5 |
 
 #### Branch Instructions
 
 | Instruction | Cycles | Condition |
 |-------------|--------|-----------|
-| BRA | 3 | Always |
-| BRN | 3 | Never |
-| BHI | 3 | C=0 AND Z=0 |
-| BLS | 3 | C=1 OR Z=1 |
-| BCC/BHS | 3 | C=0 |
-| BCS/BLO | 3 | C=1 |
-| BNE | 3 | Z=0 |
-| BEQ | 3 | Z=1 |
-| BHCC | 3 | H=0 |
-| BHCS | 3 | H=1 |
-| BPL | 3 | N=0 |
-| BMI | 3 | N=1 |
-| BMC | 3 | I=0 |
-| BMS | 3 | I=1 |
-| BIL | 3 | IRQ line low |
-| BIH | 3 | IRQ line high |
+| BRA | 4/3 | Always |
+| BRN | 4/3 | Never |
+| BHI | 4/3 | C=0 AND Z=0 |
+| BLS | 4/3 | C=1 OR Z=1 |
+| BCC/BHS | 4/3 | C=0 |
+| BCS/BLO | 4/3 | C=1 |
+| BNE | 4/3 | Z=0 |
+| BEQ | 4/3 | Z=1 |
+| BHCC | 4/3 | H=0 |
+| BHCS | 4/3 | H=1 |
+| BPL | 4/3 | N=0 |
+| BMI | 4/3 | N=1 |
+| BMC | 4/3 | I=0 |
+| BMS | 4/3 | I=1 |
+| BIL | 4/3 | IRQ line low |
+| BIH | 4/3 | IRQ line high |
 
 #### Bit Manipulation Instructions
 
 | Instruction | Bytes | Cycles | Description |
 |-------------|-------|--------|-------------|
-| BSET n,$dd | 2 | 5 | Set bit n in direct memory |
-| BCLR n,$dd | 2 | 5 | Clear bit n in direct memory |
-| BRSET n,$dd,$rr | 3 | 5 | Branch if bit n set |
-| BRCLR n,$dd,$rr | 3 | 5 | Branch if bit n clear |
+| BSET n,$dd | 2 | 7/5 | Set bit n in direct memory |
+| BCLR n,$dd | 2 | 7/5 | Clear bit n in direct memory |
+| BRSET n,$dd,$rr | 3 | 10/5 | Branch if bit n set |
+| BRCLR n,$dd,$rr | 3 | 10/5 | Branch if bit n clear |
 
 #### Control Instructions
 
 | Instruction | Bytes | Cycles | Description |
 |-------------|-------|--------|-------------|
-| NOP | 1 | 2 | No operation |
-| TAX | 1 | 2 | Transfer A to X |
-| TXA | 1 | 2 | Transfer X to A |
-| CLC | 1 | 2 | Clear carry |
-| SEC | 1 | 2 | Set carry |
-| CLI | 1 | 2 | Clear interrupt mask |
-| SEI | 1 | 2 | Set interrupt mask |
-| RSP | 1 | 2 | Reset stack pointer |
-| STOP | 1 | 2 | Stop oscillator |
-| WAIT | 1 | 2 | Wait for interrupt |
+| NOP | 1 | 2/2 | No operation |
+| TAX | 1 | 2/2 | Transfer A to X |
+| TXA | 1 | 2/2 | Transfer X to A |
+| CLC | 1 | 2/2 | Clear carry |
+| SEC | 1 | 2/2 | Set carry |
+| CLI | 1 | 2/2 | Clear interrupt mask |
+| SEI | 1 | 2/2 | Set interrupt mask |
+| RSP | 1 | 2/2 | Reset stack pointer |
+| STOP | 1 | -/2 | Stop oscillator |
+| WAIT | 1 | -/2 | Wait for interrupt |
 
-*STOP and WAIT are M146805 CMOS instructions, implemented here for M6805 family compatibility.*
+*STOP and WAIT are M146805 CMOS instructions, implemented here for M6805 family compatibility. The MC68705P3 and MC68705P5 do not have them.*
 
 #### Jump and Subroutine Instructions
 
 | Instruction | DIR | EXT | IX | IX1 | IX2 |
 |-------------|-----|-----|-----|-----|-----|
-| JMP | 2 | 3 | 2 | 3 | 4 |
-| JSR | 5 | 6 | 5 | 6 | 7 |
-| BSR (relative) | 6 | - | - | - | - |
-| RTS | 6 | - | - | - | - |
+| JMP | 3/2 | 4/3 | 3/2 | 4/3 | 5/4 |
+| JSR | 7/5 | 8/6 | 7/5 | 8/6 | 9/7 |
+| BSR (relative) | 8/6 | - | - | - | - |
+| RTS | 6/6 | - | - | - | - |
 
 #### Interrupt Instructions
 
 | Instruction | Cycles | Description |
 |-------------|--------|-------------|
-| SWI | 10 | Software interrupt |
-| RTI | 9 | Return from interrupt |
-| Hardware IRQ | 10 | External/Timer interrupt |
+| SWI | 11/10 | Software interrupt |
+| RTI | 9/9 | Return from interrupt |
+| Hardware IRQ | 11/10 | External/Timer interrupt |
 
 ### Opcode Map
 
@@ -359,9 +365,11 @@ output wire        rom_cs    // ROM chip select
 ```
   7   6   5   4   3   2   1   0
 ┌───┬───┬───┬───┬───┬───┬───┬───┐
-│CLK│TOP│CLS│ - │ - │P2 │P1 │P0 │
+│CLK│TOP│CLS│TIE│ - │P2 │P1 │P0 │
 └───┴───┴───┴───┴───┴───┴───┴───┘
-  │   │   │           └───┴───┴── Prescaler Option
+  │   │   │   │   │   └───┴───┴── Prescaler Option
+  │   │   │   │   └────────────── Not used (MC68705P5: SNM, not modeled)
+  │   │   │   └────────────────── Timer External Input Enable, initial TCR TIE (TOPT = 0)
   │   │   └────────────────────── Timer Clock Source
   │   └────────────────────────── Timer Option (0=software, 1=fixed)
   └────────────────────────────── Clock Type (0=crystal, 1=RC)
@@ -372,7 +380,9 @@ output wire        rom_cs    // ROM chip select
 ### Instantiation Example
 
 ```verilog
-x68705_mcu u_mcu (
+x68705_mcu #(
+    .HMOS     ( 1          )  // 1 = M6805 HMOS cycle counts, 0 = M146805 CMOS
+) u_mcu (
     .clk      ( clk_sys    ), // System clock
     .rst      ( reset      ), // Synchronous reset
     .cen      ( mcu_cen    ), // Clock enable
@@ -398,6 +408,10 @@ x68705_mcu u_mcu (
     .timer_in ( timer_clk  )  // External timer clock input
 );
 ```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `HMOS` | 0 | 1 = M6805 HMOS cycle counts (MC68705P3/P5), 0 = M146805 CMOS cycle counts |
 
 ### RAM Customization
 
@@ -436,18 +450,21 @@ assign ram_dout = ram_q;
 
 The x6805 CPU core implements the standard M6805 instruction set shared across the entire family. Future releases will expand support for additional variants:
 
-| Feature | MC68705P3 (Current) | MC68705P5 | MC68705R3 | MC68705U3 |
-|---------|---------------------|-----------|-----------|-----------|
+| Feature | MC68705P3 (Current) | MC68705P5 (Current) | MC68705R3 | MC68705U3 |
+|---------|---------------------|---------------------|-----------|-----------|
 | CPU Core | ✓ Same | ✓ Same | ✓ Same | ✓ Same |
 | Port A | 8-bit | 8-bit | 8-bit | 8-bit |
 | Port B | 8-bit | 8-bit | 8-bit | 8-bit |
 | Port C | 4-bit | 4-bit | 8-bit | 8-bit |
-| Port D | Not present | Not present | 8-bit | 8-bit |
+| Port D | Not present | Not present | 8-bit input | 8-bit input |
 | A/D Converter | No | No | Yes | No |
 | RAM | 112 bytes | 112 bytes | 112 bytes | 112 bytes |
 | User ROM | 1804 bytes | 1804 bytes | 3776 bytes | 3776 bytes |
 | MOR Location | $784 | $784 | $F38 | $F38 |
-| MOR SNM Bit | No | Yes | Yes | Yes |
+| MOR SNM Bit | No | Yes (not modeled) | No | No |
+| Instruction Timing | HMOS | HMOS | HMOS | HMOS |
+
+The MC68705P5 differs from the MC68705P3 only in MOR bit 3, SNM, the EPROM security bit, with its secure-mode signature at $782-$783 and the bootstrap lockout in secure mode. The memory map, registers, ports, timer, vectors, pinout, clock options and instruction timing are the same (MC68705P3 and MC68705P5 data sheets). With SNM = 0 a P5 image runs on x68705 unchanged; x68705 does not model the secure mode.
 
 ## Project Structure
 
@@ -455,18 +472,23 @@ The x6805 CPU core implements the standard M6805 instruction set shared across t
 x68705/
 ├── doc/
 │   ├── 00_M6805_M146805_Users_Manual.pdf
-│   └── 01_M68705P3_Datasheet.pdf
+│   ├── 01_M68705P3_Datasheet.pdf
+│   └── M6805 Family/
+│       ├── 02_MC68705P5_Datasheet.pdf
+│       ├── 03_MC68705R3_Datasheet.pdf
+│       └── 04_MC68705U3_Datasheet.pdf
 ├── hdl/
-│   ├── x68705.v          # Core integration module
-│   ├── x6805.v           # CPU state machine and instruction decoder
-│   ├── x6805_alu.v       # Arithmetic logic unit
-│   ├── x68705_io.v       # Parallel I/O ports
-│   ├── x68705_timer.v    # Timer/counter peripheral
-│   └── x68705_mem.v      # RAM and address decoder
+│   ├── x68705.v           # Core integration module
+│   ├── x6805.v            # CPU state machine and instruction decoder
+│   ├── x6805_alu.v        # Arithmetic logic unit
+│   ├── x68705_io.v        # Parallel I/O ports
+│   ├── x68705_timer.v     # Timer/counter peripheral
+│   └── x68705_mem.v       # RAM and address decoder
 ├── sim/
-│   └── tb_x68705.v       # Comprehensive testbench
-├── x68705_mcu.v          # Top-level MCU wrapper with MOR handling
-└── x68705.qip            # Quartus project include file
+│   ├── tb_x68705.v        # Comprehensive testbench
+│   └── tb_x68705_cycles.v # Cycle count of every opcode, HMOS and CMOS
+├── x68705_mcu.v           # Top-level MCU wrapper with MOR handling
+└── x68705.qip             # Quartus project include file
 ```
 
 ## Design Verification
@@ -476,7 +498,7 @@ The testbench (`tb_x68705.v`) provides comprehensive verification across 19 sect
 <small>
 
 - **Instruction Coverage**: All 62 operations across 10 addressing modes
-- **Cycle Timing**: Verified against M6805 CMOS Family User's Manual
+- **Cycle Timing**: Verified against the User's Manual opcode map, CMOS counts with `HMOS = 0` and HMOS counts with `HMOS = 1`
 - **Flag Behavior**: H, I, N, Z, C flags tested per instruction
 - **Interrupt Handling**: IRQ, TIRQ, SWI with priority verification
 - **Peripheral Access**: I/O ports and timer register operations
@@ -485,13 +507,24 @@ The testbench (`tb_x68705.v`) provides comprehensive verification across 19 sect
 
 ```
 vlog tb_x68705.v x68705_mcu.v hdl/*.v
-vsim -c tb_x68705 -do "run -all"
+vsim -c tb_x68705 -do "run -all"             # CMOS counts
+vsim -c -gHMOS=1 tb_x68705 -do "run -all"    # HMOS counts
+```
+
+Both modes pass all 158 tests.
+
+The cycle testbench (`tb_x68705_cycles.v`) runs each of the 207 defined opcodes and the /INT entry and checks the machine-cycle count of each against the opcode map: 208 checks, all passing, in both modes.
+
+```
+vlog tb_x68705_cycles.v x68705_mcu.v hdl/*.v
+vsim -c tb_x68705_cycles -do "run -all"           # HMOS counts
+vsim -c -gHMOS=0 tb_x68705_cycles -do "run -all"  # CMOS counts
 ```
 
 <table align="center">
   <tr>
     <td align="center" style="padding: 10px;">
-      <img align="center" src="img/20260328_x68705.png">
+      <img align="center" src="img/20260930_x68705.png">
     </td>
   </tr>
 </table>
@@ -500,12 +533,12 @@ vsim -c tb_x68705 -do "run -all"
 =============================================================
   MC68705P3 Comprehensive Test Results
 =============================================================
-  Total Tests:  156
-  Passed:       156
+  Total Tests:  158
+  Passed:       158
   Failed:       0
 =============================================================
   *** ALL TESTS PASSED ***
-  Cycle-accurate to M6805 CMOS Manual
+  Cycle-accurate to the CMOS counts of the M6805/M146805 manual
 =============================================================
 ```
 
@@ -513,8 +546,11 @@ Per-test output: [tb_x68705](doc/readme/tb_x68705_log.md)
 
 ## Design References
 
-- MC68705P3 8-BIT EPROM Micro Computer Unit Data Sheet (Motorola)
-- M6805/M146805 CMOS Family User's Manual, Second Edition (Motorola)
+- [Motorola MC68705P3 8-BIT EPROM Micro Computer Unit Data Sheet](doc/01_M68705P3_Datasheet.pdf)
+- [Motorola MC68705P5 8-Bit EPROM Microcomputer Unit Data Sheet](doc/M6805%20Family/02_MC68705P5_Datasheet.pdf):<br>
+  <small><i>(Tables 1-5: HMOS instruction timing)</i></small>
+- [Motorola M6805/M146805 CMOS Family User's Manual, Second Edition](doc/00_M6805_M146805_Users_Manual.pdf):<br>
+  <small><i>(Opcode map: HMOS/CMOS cycle columns; Appendix G: Tables G1 and G2)</i></small>
 
 ## License
 

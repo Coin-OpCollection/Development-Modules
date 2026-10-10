@@ -1,12 +1,13 @@
 # x68705 Regression Log
 
-Full output of the `tb_x68705` testbench (156 tests across 19 sections). See [README.md](../../README.md#design-verification) for the section-by-section description.
+Full output of the `tb_x68705` testbench (158 tests across 19 sections). See [README.md](../../README.md#design-verification) for the section-by-section description.
 
 ```
 =============================================================
   MC68705P3 Comprehensive MCU Testbench
   Reference: M6805/M146805 CMOS Family User's Manual
 =============================================================
+
 
 === SECTION 1: Inherent Mode Control Instructions ===
 
@@ -198,10 +199,12 @@ PASS: RTI: SP = $3F = 0000003f
 
 === SECTION 16: Hardware Interrupts ===
 
+PASS: IRQ entry timing = 10 cycles
 PASS: IRQ: PC = $0300 (ISR) = 00000300
 PASS: IRQ: I = 1 = 00000001
 PASS: IRQ masked: PC = $0101 = 00000101
 PASS: IRQ masked: A = $11 (INCA ran) = 00000011
+PASS: TIRQ entry timing = 10 cycles
 PASS: TIRQ: PC = $0400 (Timer ISR) = 00000400
 PASS: Priority: TIRQ > IRQ = 00000400
 
@@ -224,11 +227,11 @@ PASS: RAM[$7F] = $7F = 0000007f
 =============================================================
   MC68705P3 Comprehensive Test Results
 =============================================================
-  Total Tests:  156
-  Passed:       156
+  Total Tests:  158
+  Passed:       158
   Failed:       0
 =============================================================
   *** ALL TESTS PASSED ***
-  Cycle-accurate to M6805 CMOS Manual
+  Cycle-accurate to the CMOS counts of the M6805/M146805 manual
 =============================================================
 ```

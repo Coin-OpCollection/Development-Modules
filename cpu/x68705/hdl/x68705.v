@@ -46,7 +46,9 @@
 //                   RAM, and external EPROM ($80-$7FF).
 //============================================================================
 
-module x68705 (
+module x68705 #(
+    parameter HMOS = 0
+)(
     input  wire        clk,
     input  wire        rst,
     input  wire        cen,
@@ -128,7 +130,9 @@ wire tstop;
 // code register. Handles instruction fetch, decode, execute cycles
 // and interrupt processing for IRQ, TIRQ, and SWI.
 //------------------------------------------------------------------------
-x6805 u_cpu (
+x6805 #(
+    .HMOS ( HMOS )
+) u_cpu (
     .clk        ( clk        ),
     .rst        ( rst        ),
     .cen        ( cen        ),

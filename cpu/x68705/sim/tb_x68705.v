@@ -16,7 +16,8 @@
 //  Comprehensive testbench for the MC68705P3 microcomputer implementation.
 //
 //  Verifies all CPU instructions with functional correctness and cycle-
-//  accurate timing per the M6805 CMOS Family User's Manual. Tests cover
+//  accurate timing per the M6805/M146805 User's Manual opcode map: the
+//  CMOS counts by default, the HMOS counts with HMOS = 1. Tests cover
 //  all seven addressing modes: inherent, immediate, direct, extended,
 //  indexed (3 variants), relative, and bit manipulation (2 variants).
 //
@@ -67,6 +68,10 @@
 `timescale 1ns/1ps
 
 module tb_x68705;
+
+// HMOS = 1 runs the core with M6805 HMOS cycle counts; the timing checks
+// then expect the HMOS counts of the User's Manual opcode map.
+parameter HMOS = 0;
 
 //=========================================================================
 // Test Signals:
@@ -121,7 +126,9 @@ end
 // DUT Instantiation:
 // Complete MC68705P3 MCU including CPU, ALU, memory, I/O, and timer.
 //=========================================================================
-x68705 uut (
+x68705 #(
+    .HMOS ( HMOS )
+) uut (
     .clk      ( clk      ),
     .rst      ( rst      ),
     .cen      ( cen      ),
@@ -194,10 +201,15 @@ endtask
 // Executes one instruction and returns total cycle count. Used for
 // cycle-accurate timing verification against M6805 manual.
 //-------------------------------------------------------------------------
+reg [7:0] timed_op;
+reg       timed_int;
+
 task run_instruction_timed;
     output integer cycles;
     begin
         cycle(); // Start instruction execution
+        timed_op = uut.u_cpu.opcode;
+        timed_int = uut.u_cpu.irq_ack;
         count_cycles(cycles);
         cycles = cycles + 1; // Include the starting cycle
     end
@@ -292,15 +304,40 @@ task check;
 endtask
 
 //-------------------------------------------------------------------------
+// HMOS Count:
+// Cycles by which the M6805 HMOS count exceeds the M146805 CMOS count for
+// an opcode, from the User's Manual opcode map, and 1 for a hardware
+// interrupt entry (11 HMOS against 10 CMOS, Appendix G Tables G1, G2).
+//-------------------------------------------------------------------------
+function [31:0] hmos_delta;
+    input [7:0] op;
+    input       int_entry;
+    begin
+        if(int_entry)
+            hmos_delta = 1;
+        else if(op[7:4] == 4'h0)
+            hmos_delta = 5;
+        else if(op[7:4] == 4'h1 || op == 8'h3D || op == 8'h6D || op == 8'h7D || op[3:0] == 4'hD && op[7:4] >= 4'hA)
+            hmos_delta = 2;
+        else if(op == 8'h80 || op == 8'h81 || op[7:4] == 4'h9 || op[7:4] == 4'hA)
+            hmos_delta = 0;
+        else
+            hmos_delta = 1;
+    end
+endfunction
+
+//-------------------------------------------------------------------------
 // Timing Check:
-// Verifies instruction executed in expected number of cycles per M6805
-// CMOS manual timing specifications.
+// Verifies instruction executed in expected number of cycles per the
+// User's Manual opcode map: the CMOS count, or the HMOS count with HMOS = 1.
 //-------------------------------------------------------------------------
 task check_timing;
     input [31:0] actual_cycles;
-    input [31:0] expected_cycles;
+    input [31:0] cmos_cycles;
     input [255:0] name;
+    reg   [31:0] expected_cycles;
     begin
+        expected_cycles = cmos_cycles + (HMOS ? hmos_delta(timed_op, timed_int) : 0);
         total_tests = total_tests + 1;
         if(actual_cycles === expected_cycles) begin
             passed_tests = passed_tests + 1;
@@ -1084,7 +1121,8 @@ initial begin
     uut.u_cpu.reg_a = 8'h11;
     uut.u_cpu.reg_x = 8'h22;
     irq = 1'b1;
-    run_instruction();
+    run_instruction_timed(cycle_count);
+    check_timing(cycle_count, 10, "IRQ entry timing");
     check(uut.u_cpu.reg_pc, 13'h0300, "IRQ: PC = $0300 (ISR)");
     check(uut.u_cpu.cc_i, 1'b1, "IRQ: I = 1");
     irq = 1'b0;
@@ -1107,7 +1145,8 @@ initial begin
     uut.u_cpu.cc_i = 1'b0;
     uut.u_timer.tcr[7] = 1'b1;         // Set TIR (interrupt request)
     uut.u_timer.tcr[6] = 1'b0;         // Clear TIM (unmask)
-    run_instruction();
+    run_instruction_timed(cycle_count);
+    check_timing(cycle_count, 10, "TIRQ entry timing");
     check(uut.u_cpu.reg_pc, 13'h0400, "TIRQ: PC = $0400 (Timer ISR)");
     uut.u_timer.tcr[7] = 1'b0;         // Clear TIR
 
@@ -1214,7 +1253,7 @@ initial begin
 
     if(failed_tests == 0) begin
         $display("  *** ALL TESTS PASSED ***");
-        $display("  Cycle-accurate to M6805 CMOS Manual");
+        $display("  Cycle-accurate to the %0s counts of the M6805/M146805 manual", HMOS ? "HMOS" : "CMOS");
     end else begin
         $display("  *** SOME TESTS FAILED ***");
     end
