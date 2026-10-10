@@ -38,14 +38,15 @@ The **x76489** is a fully synchronous Verilog implementation of the Texas Instru
 | 5 | [Audio Output](#audio-output) | `AOUT` and the chip's output amplifier |
 | 6 | [Control Interface](#control-interface) | Verilog port-level reference: `x76489` ports |
 | 7 | [Design Usage](#design-usage) | Instantiation example and bus timing rules |
-| 8 | [Implementation Notes](#implementation-notes) | Sources of the undocumented behavior and where the implementation and the TI documents differ |
-| 9 | [SN76489 Family Roadmap](#sn76489-family-roadmap) | Position of x76489 among the SN76489AN, SN76494 and SN76496 |
-| 10 | [Project Structure](#project-structure) | Directory tree of the IP package |
-| 11 | [Design Verification](#design-verification) | Testbench section breakdown, run command, ModelSim screenshot, final summary box. Per-test log: [tb_x76489](doc/readme/tb_x76489_log.md). |
-| 12 | [VGM Playback](#vgm-playback) | VGM playback testbench and the VGM-to-WAV toolchain |
-| 13 | [Design References](#design-references) | TI documents, the die schematic and the VGM specification |
-| 14 | [License](#license) | Creative Commons Attribution-NonCommercial 4.0 International |
-| 15 | [Support](#support) | Back ongoing Coin-Op Collection FPGA core development on Patreon |
+| 8 | [Device Usage](#device-usage) | FPGA resource usage, timing and Fmax of a standalone compile on two Cyclone V parts |
+| 9 | [Implementation Notes](#implementation-notes) | Sources of the undocumented behavior and where the implementation and the TI documents differ |
+| 10 | [SN76489 Family Roadmap](#sn76489-family-roadmap) | Position of x76489 among the SN76489AN, SN76494 and SN76496 |
+| 11 | [Project Structure](#project-structure) | Directory tree of the IP package |
+| 12 | [Design Verification](#design-verification) | Testbench section breakdown, run command, ModelSim screenshot, final summary box. Per-test log: [tb_x76489](doc/readme/tb_x76489_log.md). |
+| 13 | [VGM Playback](#vgm-playback) | VGM playback testbench and the VGM-to-WAV toolchain |
+| 14 | [Design References](#design-references) | TI documents, the die schematic and the VGM specification |
+| 15 | [License](#license) | Creative Commons Attribution-NonCommercial 4.0 International |
+| 16 | [Support](#support) | Back ongoing Coin-Op Collection FPGA core development on Patreon |
 
 ## System Architecture
 
@@ -241,6 +242,38 @@ x76489 u_psg (
 - A write that starts during a transfer is kept and loads 32 `CEN` pulses after that transfer's byte; a later one replaces it.
 - Wire `READY` to the CPU's WAIT for the chip's bus timing; a CPU that waits on it holds each write until its byte loads.
 - `AOUT` is unsigned with silence at 0; a tone moves between 0 and its level, so `AOUT` carries a DC part, as the chip's output does.
+
+## Device Usage
+
+A standalone compile of `x76489` in Quartus 22.1std, its ports as virtual pins, with a 96 MHz clock. The IP needs no SDC: every path meets timing in one clock.
+
+### Cyclone V 5CSEBA6U23I7
+
+| Module | ALMs | ALUTs | Registers | Block Memory Bits | M10K | DSP |
+|--------|------|-------|-----------|-------------------|------|-----|
+| `x76489` | 172.5 (0.4%) | 245 | 147 | 0 | 0 | 0 |
+| `x76489_host` | 66.5 | 64 | 79 | 0 | 0 | 0 |
+| `x76489_tone` (1) | 18.5 | 34 | 11 | 0 | 0 | 0 |
+| `x76489_tone` (2) | 17.0 | 33 | 11 | 0 | 0 | 0 |
+| `x76489_tone` (3) | 16.8 | 33 | 11 | 0 | 0 | 0 |
+| `x76489_noise` | 8.3 | 12 | 23 | 0 | 0 | 0 |
+| `x76489_edge` | 0.3 | 0 | 1 | 0 | 0 | 0 |
+
+Fmax 161.21 MHz. At 96 MHz: setup slack +4.213 ns, hold slack +0.163 ns.
+
+### Cyclone V 5CEBA4F23C8
+
+| Module | ALMs | ALUTs | Registers | Block Memory Bits | M10K | DSP |
+|--------|------|-------|-----------|-------------------|------|-----|
+| `x76489` | 172.5 (0.9%) | 245 | 147 | 0 | 0 | 0 |
+| `x76489_host` | 68.0 | 64 | 79 | 0 | 0 | 0 |
+| `x76489_tone` (1) | 18.5 | 34 | 11 | 0 | 0 | 0 |
+| `x76489_tone` (2) | 17.0 | 33 | 11 | 0 | 0 | 0 |
+| `x76489_tone` (3) | 16.8 | 33 | 11 | 0 | 0 | 0 |
+| `x76489_noise` | 7.3 | 12 | 23 | 0 | 0 | 0 |
+| `x76489_edge` | 0.3 | 0 | 1 | 0 | 0 | 0 |
+
+Fmax 154.32 MHz. At 96 MHz: setup slack +3.936 ns, hold slack +0.083 ns.
 
 ## Implementation Notes
 
