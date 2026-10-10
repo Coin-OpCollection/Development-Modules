@@ -27,11 +27,11 @@
 //  Shift Register:
 //    lfsr shifts toward bit 0, and out is bit 0, the last stage. With FB =
 //    1 the stage shifted in is the XOR of the last two stages, bits 0 and
-//    1. restart, a latch byte to the noise control register, and reset
-//    reseed lfsr to 100...0, one stage opposite to the other fourteen; the
-//    data sheet calls this clearing the register [p.3]. With FB = 0 the
-//    register rotates, so the seed returns every 15 shifts. The die
-//    shifts a constant in and reseeds from a detector on all 15 stages,
+//    1. restart, a latch or data byte to the noise control register, and
+//    reset reseed lfsr to 100...0, one stage opposite to the other
+//    fourteen; the data sheet calls this clearing the register [p.3]. With
+//    FB = 0 the register rotates, so the seed returns every 15 shifts. The
+//    die shifts a constant in and reseeds from a detector on all 15 stages,
 //    which gives the same 15-shift period.
 //
 //  The register length is from the TI-99/4A Servicing Manual (Noise

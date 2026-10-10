@@ -16,11 +16,12 @@ The **x76489** is a fully synchronous Verilog implementation of the Texas Instru
 
 <small>
 
-- **Fully Synchronous Design**: All state changes occur on the positive edge of `CLK`. Chip timing counts `CEN`, one pulse per input clock, and a byte is written on a `CLK` with `CEN` high. No latches or asynchronous logic.
+- **Fully Synchronous Design**: All state changes occur on the positive edge of `CLK`. Chip timing counts `CEN`, one pulse per input clock; the bus is sampled on every `CLK`. No latches or asynchronous logic.
 - **Three Tone Generators**: 10-bit periods, f = N / 32n for an input clock N, a period of 0 counting 1024.
 - **Noise Generator**: A 15-stage shift register, white or periodic, shifted at N/512, N/1024, N/2048 or on the tone 3 output.
-- **Four Attenuators**: 2 dB steps from 0 to 28 dB, and OFF.
-- **Register Interface**: A latch byte selects one of eight registers and loads its low bits; data bytes alone load the six high bits of a latched frequency or a latched attenuation, so a frequency can be swept with one byte per step.
+- **Four Attenuators**: 2 dB steps, 0-28 dB, and OFF.
+- **Register Interface**: A latch byte selects one of eight registers and loads its low bits; data bytes alone load the latched register again, the six high bits of a frequency, an attenuation or the noise control, so a frequency can be swept with one byte per step.
+- **Write Transfer and READY**: Each byte loads on the 32nd input clock of its write, with `READY` low while `CSn` is low until then; a write released sooner still completes, and a write during a transfer loads after it.
 - **Audio Output**: `AOUT`, the four channels summed, 8 bits unsigned.
 - **VGM Playback Validation**: A VGM playback testbench (`tb_x76489_vgm`) plays SN76489 VGM streams (command `0x50`), and `wav_batch.py` writes 8-bit mono WAV files. See [VGM Playback](#vgm-playback).
 
@@ -42,47 +43,52 @@ The **x76489** is a fully synchronous Verilog implementation of the Texas Instru
 | 10 | [Project Structure](#project-structure) | Directory tree of the IP package |
 | 11 | [Design Verification](#design-verification) | Testbench section breakdown, run command, ModelSim screenshot, final summary box. Per-test log: [tb_x76489](doc/readme/tb_x76489_log.md). |
 | 12 | [VGM Playback](#vgm-playback) | VGM playback testbench and the VGM-to-WAV toolchain |
-| 13 | [Design References](#design-references) | TI documents, the die schematics and the VGM specification |
+| 13 | [Design References](#design-references) | TI documents, the die schematic and the VGM specification |
 | 14 | [License](#license) | Creative Commons Attribution-NonCommercial 4.0 International |
 | 15 | [Support](#support) | Back ongoing Coin-Op Collection FPGA core development on Patreon |
 
 ## System Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                                  x76489                                  │
-│                                                                          │
-│  ┌─────────────────────┐    ┌──────────────┐                             │
-│  │  Control Registers  │───>│ x76489_tone  │──> Attenuation 1 ──┐        │
-│  │                     │    │ tone 1       │                    │        │
-│  │ CSn WRn D0-D7       │    ├──────────────┤                    │        │
-│  │ latch / data byte   │───>│ x76489_tone  │──> Attenuation 2 ──┤        │
-│  │ 8 registers         │    │ tone 2       │                    │        │
-│  │                     │    ├──────────────┤                    ├──> Sum ┼─> AOUT
-│  │  Prescaler          │───>│ x76489_tone  │──> Attenuation 3 ──┤        │
-│  │ CEN / 16 = pre_cen  │    │ tone 3       │──┐                 │        │
-│  └──────────┬──────────┘    └──────────────┘  │ tone 3          │        │
-│             │               ┌──────────────┐  │                 │        │
-│             └──────────────>│ x76489_noise │<─┘                 │        │
-│                             │ 15 stages    │──> Attenuation 4 ──┘        │
-│                             │ x76489_edge  │                             │
-│                             └──────────────┘                             │
-│                                                                          │
-└──────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                                    x76489                                    │
+│                                                                              │
+│  ┌─────────────────────┐ attenuations                                        │
+│  │  x76489_host        │─────────────────────────────────────────┐           │
+│  │                     │                                         v           │
+│  │ CSn WRn D0-D7       │ periods        ┌──────────────┐     ┌─────────────┐ │
+│  │ 32-CEN transfer     │───────────────>│ x76489_tone  │────>│             │ │
+│  │ READY, 8 registers  │                │ tone 1-3     │────>│ Attenuation │ │
+│  │                     │                │              │──┬─>│ 1-4 and Sum │ │
+│  │                     │                └──────────────┘  │  │             │ │
+│  │                     │                       ^          │  │             │ │
+│  │                     │ ┌───────────┐         │          │  │             │ │
+│  │                     │ │ Prescaler │─────────┤ pre_cen  │  │             ├─┼─> AOUT
+│  │                     │ │ CEN / 16  │         │          │  │             │ │
+│  │                     │ └───────────┘         │   tone 3 │  │             │ │
+│  │                     │                       v          │  │             │ │
+│  │                     │ noise control  ┌──────────────┐  │  │             │ │
+│  │                     │───────────────>│ x76489_noise │<─┘  │             │ │
+│  │                     │                │ 15 stages    │────>│             │ │
+│  └─────────────────────┘                │ x76489_edge  │     │             │ │
+│                                         └──────────────┘     └─────────────┘ │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Module Hierarchy
 
 | Module | Description | Lines |
 |--------|-------------|-------|
-| `x76489.v` | Top level: instantiates the submodules; prescaler, control registers, attenuation levels, output sum | ~287 |
+| `x76489.v` | Top level: instantiates the submodules; prescaler, attenuation levels, output sum | ~267 |
+| `x76489_host.v` | Bus controller and control registers: the 32-`CEN` write transfer, `READY`, latch and data bytes | ~229 |
 | `x76489_tone.v` | Tone generator: 10-bit down counter and output toggle | ~74 |
 | `x76489_noise.v` | Noise generator: shift-rate divider and select, 15-stage shift register | ~122 |
 | `x76489_edge.v` | Rising edge detector for the shift-rate source | ~46 |
 
 ## Register Map
 
-Page references are from the Advanced Circuits SN76489AN data sheet (`doc/02`).
+Page references are from the TI SN76489AN Data Sheet, Advanced Circuits, November 1981.
 
 | R0 R1 R2 | Register | Bits | Reference |
 |----------|----------|------|-----------|
@@ -109,13 +115,13 @@ Noise control:              1   1   1   0   x  FB NF0 NF1
 Attenuation:                1  R0  R1  R2  A0  A1  A2  A3
 ```
 
-A latch byte (D0 = 1) selects the register by R0-R2 and loads its low bits; a data byte (D0 = 0) loads F0-F5 of the latched tone frequency, or A0-A3 of the latched attenuation, which the data sheet does not show (see [Implementation Notes](#implementation-notes)). The register address stays latched, so data bytes alone change the six high bits of a frequency for sweeps [p.3]. A latch byte to the noise control register also reseeds the shift register [p.3].
+A latch byte (D0 = 1) selects the register by R0-R2 and loads its low bits; a data byte (D0 = 0) loads F0-F5 of the latched tone frequency, A0-A3 of the latched attenuation or FB, NF0 and NF1 of the latched noise control. The register address stays latched, so data bytes alone change the six high bits of a frequency for sweeps [p.3]. A byte to the noise control register also reseeds the shift register [p.3].
 
 The chip has no reset pin [p.6]. `RESETn` sets each tone register to 1, each attenuation to 1111 (OFF), the noise control to FB = 1 and NF0, NF1 = 00 (white noise at N/512) and the address latch to 000, so the output starts silent.
 
 ### Attenuation
 
-A0-A3 weigh 16, 8, 4 and 2 dB and add, 0 to 28 dB; 1111 is OFF (Table 1 [p.2]). The levels are ideal 2 dB steps, 1023 x 10^(-step / 10) rounded down; the chip holds each weight within 1 dB [p.7].
+A0-A3 weigh 16, 8, 4 and 2 dB and add, 0-28 dB; 1111 is OFF (Table 1 [p.2]). The levels are ideal 2 dB steps, 1023 x 10^(-step / 10) rounded down; the chip holds each weight within 1 dB [p.7].
 
 | A0-A3 | Attenuation | Level | A0-A3 | Attenuation | Level |
 |-------|-------------|-------|-------|-------------|-------|
@@ -171,7 +177,7 @@ Each tone is a 10-bit down counter stepped by `pre_cen`. At zero it reloads with
 
 ### Noise Generator
 
-A 15-stage shift register (TI-99/4A Servicing Manual, p. 74) shifts on each rising edge of the selected rate. The output is the last stage. With FB = 1 the stage shifted in is the XOR of the last two stages, a 32767-shift sequence; with FB = 0 the register rotates, so the seed returns every 15 shifts and the output is high for one shift in 15. A latch byte to the noise control register, and `RESETn`, reseed the register with one stage opposite to the other fourteen, which the data sheet calls clearing it [p.3].
+A 15-stage shift register (TI-99/4A Servicing Manual, p. 74) shifts on each rising edge of the selected rate. The output is the last stage. With FB = 1 the stage shifted in is the XOR of the last two stages, a 32767-shift sequence; with FB = 0 the register rotates, so the seed returns every 15 shifts and the output is high for one shift in 15. A latch or data byte to the noise control register, and `RESETn`, reseed the register with one stage opposite to the other fourteen, which the data sheet calls clearing it [p.3].
 
 ### Attenuators
 
@@ -180,7 +186,7 @@ Each channel, the three tones and the noise, has its own 4-bit attenuation, appl
 ## Audio Output
 
 - **`AOUT`**: the sum of the four channel levels, each 0-1023, bits 11-4, registered on every `CLK`. One channel at 0 dB moves between 0 and 63, and all four together reach 255. Silence is 0.
-- **The chip**: the four attenuator outputs are summed as one internally generated current of 0 to -160 uA into an operational amplifier with 17 kOhm feedback and a +1.5 V typical reference (Figure 2 [p.8], Figure 4 [p.11]), which drives up to 10 mA on AUDIO OUT [p.3]. Silence is a DC level, and the board couples the output to its amplifier through a capacitor (Figure 2 [p.8]); pin 7 is decoupled with 10 Ohm and 0.1 uF to ground [p.3].
+- **The chip**: silence is a DC level, and the output is capacitor-coupled to the board's amplifier (Figure 2 [p.8]).
 
 ## Control Interface
 
@@ -196,12 +202,13 @@ input  wire       CEN,    // one pulse per input clock (CLOCK)
 input  wire [7:0] DIN,    // D0-D7: DIN[7] is D0, the latch flag; DIN[0] is D7
 input  wire       CSn,    // CE
 input  wire       WRn,    // WE
+output wire       READY,  // low while CSn is low until the byte loads
 
 // Audio Output
 output reg  [7:0] AOUT    // AUDIO OUT: the four channels summed, unsigned
 ```
 
-The chip's READY output (pin 4) is not provided; see [Implementation Notes](#implementation-notes).
+On the chip READY (pin 4) is an open-collector output wired to the CPU's WAIT [p.5-6]; here it is driven both ways.
 
 ## Design Usage
 
@@ -218,6 +225,7 @@ x76489 u_psg (
     .DIN    ( cpu_dout  ),
     .CSn    ( ~psg_cs   ),
     .WRn    ( ~cpu_wr   ),
+    .READY  ( psg_ready ),
 
     // Audio Output
     .AOUT   ( psg_audio )
@@ -228,27 +236,26 @@ x76489 u_psg (
 
 - `CEN` is high for one `CLK` per input clock of the chip (3.579 MHz typ, 4 MHz max [p.9]); every chip timing counts it. `CLK` is the system clock, faster than `CEN` or equal to it.
 - `RESETn` is synchronous and acts on any `CLK` it is low.
-- A byte is written on every `CLK` on which `CEN` is high and `CSn` and `WRn` are both low. A `CSn` and `WRn` low period with no `CEN` pulse in it writes nothing; one with several writes the byte on each, which leaves the registers the same but reseeds the noise register again on a noise control write.
-- Bytes may follow each other on consecutive `CEN` pulses: the 32 clocks the chip takes per byte, and READY, are not modeled [p.5].
+- A write starts on the first `CLK` on which `CSn` and `WRn` are both low, and the byte on `DIN` is taken on that `CLK`. It loads on the `CLK` of the 32nd `CEN` pulse of the write. `READY` is low while `CSn` is low until then, and high while `CSn` is high (Table 5 [p.5]).
+- A write released before its byte loads still loads it; the chip needs CE and WE held until READY rises (SN76494/SN76496 Data Sheet, p. 4-40), and the board's CPU waits on READY. A write held 32 more `CEN` pulses after its byte loads starts another with the byte then on `DIN`.
+- A write that starts during a transfer is kept and loads 32 `CEN` pulses after that transfer's byte; a later one replaces it.
+- Wire `READY` to the CPU's WAIT for the chip's bus timing; a CPU that waits on it holds each write until its byte loads.
 - `AOUT` is unsigned with silence at 0; a tone moves between 0 and its level, so `AOUT` carries a DC part, as the chip's output does.
 
 ## Implementation Notes
 
-The data sheets give the register formats, the tone formula, the shift rates, the attenuation weights and the bus timing, but not what a period of 0 does, what a data byte does to an attenuation, the shift register taps, its seed, how periodic noise is made or the state at power-up. These follow the TI SN76489AN die schematic (`doc/05`); the register length is also given in the TI-99/4A Servicing Manual. Where the implementation and the TI documents differ:
+The data sheets give the register formats, the tone formula, the shift rates, the attenuation weights and the bus timing, but not what a period of 0 does, what a data byte does to an attenuation or the noise control, the shift register taps, its seed, how periodic noise is made or the state at power-up. These follow the TI SN76489AN die schematic; the register length is also given in the TI-99/4A Servicing Manual. Where the implementation and the TI documents differ:
 
 | Item | x76489 | TI Documents |
 |------|--------|--------------|
-| Byte transfer | A byte is written on a `CLK` with `CEN` high while `CSn` and `WRn` are low; there is no READY | About 32 clocks per byte, with READY low until the byte is loaded; CE and WE are held low until READY rises [p.5] (SN76494/SN76496 Data Sheet, p. 4-40) |
+| Byte transfer | 32 `CEN` pulses per byte, the byte loaded on the 32nd, `READY` low while `CSn` is low until then; the byte is taken as the write starts, so a shorter write still completes, and a write during a transfer loads after it | About 32 clocks per byte, READY low until loaded [p.5]; CE and WE held until READY rises (SN76494/SN76496 Data Sheet, p. 4-40) |
 | Reset | `RESETn` sets the tone registers to 1, the attenuations OFF and the noise control to white noise at N/512 | No reset pin [p.6]; the state at power-up is not given |
 | Period 0 | Counts 1024 (die) | Not defined [p.2] |
-| Data byte to an attenuation | Loads A0-A3; on the die every byte strobes the latched register | An attenuation is shown only as a single latch byte [p.3-4] |
-| Noise reseed | One stage opposite to the other fourteen (die) | The register is cleared [p.3] |
+| Data byte to an attenuation or the noise control | Loads A0-A3, or FB, NF0 and NF1 and reseeds the noise register; on the die every byte strobes the latched register | Both are shown only as single latch bytes [p.3-4] |
+| Noise reseed | Every byte to the noise control register reseeds it, one stage opposite to the other fourteen (die) | The register is cleared [p.3]; the TI-99/4A Servicing Manual clears it only when FB changes (p. 74) |
 | Periodic noise | The register rotates; the seed returns every 15 shifts | Not described; on the die a constant is shifted in and a detector on all 15 stages reseeds the register |
 | Attenuation | Ideal 2 dB steps | Each weight within 1 dB [p.7] |
 | Output | `AOUT`, the sum, unsigned, silence at 0 | A current-summing amplifier; silence is a DC level [p.8] |
-
-- **Document conflicts**: the maximum attenuation is 28 dB [p.2]; the SN76494/SN76496 Data Sheet (p. 4-40) and the TI-99/4A Servicing Manual (p. 73) give 30 dB, the sum of the four weights, though 1111 is OFF. The typeset SN76489AN data sheet (`doc/00`) prints the second row of Table 3 as 00 (`doc/02` [p.3]: 01) and the second row of Table 4 as 000 (`doc/02` [p.4]: 001), labels pin 6 OE (`doc/02` [p.1], [p.6]: CE) and titles Figure 2 an input interface (`doc/02` [p.8]: output). The SN76494/SN76496 Data Sheet (p. 4-37) says the divide-by-eight stage is deleted from the SN76496, where it means the SN76494. The Servicing Manual clears the noise register when FB changes (p. 74); the data sheet does so whenever the noise control register is changed [p.3], as on the die.
-- **Noise output polarity**: the die schematic does not settle whether the noise output is high for one shift in 15 in periodic mode, as here, or low for one; the two are the same waveform inverted, differing in the DC level and the sign of the noise channel.
 
 ## SN76489 Family Roadmap
 
@@ -262,8 +269,6 @@ The x76489 implements the SN76489AN. The SN76494 is the same chip without the di
 | Noise Rates | N/512, N/1024, N/2048 | N/64, N/128, N/256 | Not listed |
 | Clocks per Byte | 32 | 4 | 32 |
 | Audio Input (pin 9) | - | ✓ | ✓ |
-
-The SN76494/SN76496 Data Sheet's one Table 3 (p. 4-41) gives N/64, N/128 and N/256 for all four of its parts; these match the SN76494's /2 prescaler, and no rates are given for the SN76496's /16.
 
 ## Project Structure
 
@@ -279,13 +284,14 @@ x76489/
 │   └── readme/
 │       └── tb_x76489_log.md        # Full regression log
 ├── hdl/
-│   ├── x76489.v                    # Top level: registers, attenuation, output sum
+│   ├── x76489.v                    # Top level: attenuation, output sum
+│   ├── x76489_host.v               # Bus controller, write transfer, registers
 │   ├── x76489_tone.v               # Tone generator
 │   ├── x76489_noise.v              # Noise generator
 │   └── x76489_edge.v               # Rising edge detector
 ├── img/
-│   ├── 20260329_x76489.png
-│   ├── 20260329_x76489_vgm.png
+│   ├── 20261009_x76489.png
+│   ├── 20261009_x76489_vgm.png
 │   └── coc_banner.png
 ├── sim/
 │   ├── tb_x76489.v                 # Comprehensive testbench
@@ -303,16 +309,17 @@ x76489/
 
 ## Design Verification
 
-The testbench (`tb_x76489.v`) provides comprehensive verification - 29 self-checking assertions across 14 sections covering the control registers through the chip bus, the tone and noise generators, and the attenuators and channels on `AOUT`. The full chip runs on its bus with a `CEN` pulse every second `CLK`:
+The testbench (`tb_x76489.v`) provides comprehensive verification - 81 self-checking assertions across 24 sections covering the control registers and the write transfer through the chip bus, the tone and noise generators, and every attenuation level and channel on `AOUT`. The full chip runs on its bus with a `CEN` pulse every second `CLK`, and each write waits for `READY`:
 
 <small>
 
-- **REG Section A**: Attenuators after reset, tone frequency latch and data bytes, attenuation and noise control writes (11 tests)
-- **TONE Section B**: Each tone generator toggling, period 1 faster than period 8 (4 tests)
-- **NOISE Section C**: White and periodic noise, the reseed on a noise control write, tone 3 as the shift source (5 tests)
-- **ATTN Section D**: All channels OFF, a tone at 0 dB, OFF again (3 tests)
+- **REG Section A**: Reset values, tone frequency latch and data bytes, attenuation and noise control writes, a data byte to an attenuation and to the noise control (22 tests)
+- **TONE Section B**: Each tone generator toggling, period 1 faster than period 8, the half periods of n = 1, 2, 5 and 0 (8 tests)
+- **NOISE Section C**: White and periodic noise, the reseed on a noise control write, tone 3 as the shift source, the N/512, N/1024 and N/2048 rates, the 32767 and 15 shift sequences (11 tests)
+- **ATTN Section D**: All channels OFF, a tone at 0 dB, OFF again, the `AOUT` peak of every attenuation (19 tests)
 - **MIX Section E**: Each channel alone on `AOUT` (4 tests)
 - **WRITE Section F**: Attenuation and frequency writes while a tone plays (2 tests)
+- **XFER Section G**: `READY` and the load on the 32nd `CEN` pulse of a write, a one-`CLK` write, a held write loading twice, a write during a transfer (15 tests)
 
 </small>
 
@@ -327,14 +334,14 @@ vsim -c tb_x76489 -do "run -all"
 <table align="center">
   <tr>
     <td align="center" style="padding: 10px;">
-      <img align="center" src="img/20260329_x76489.png">
+      <img align="center" src="img/20261009_x76489.png">
     </td>
   </tr>
 </table>
 
 ```
 =========================================================
-  tb_x76489 results: 29 / 29 passed (0 failed)
+  tb_x76489 results: 81 / 81 passed (0 failed)
 =========================================================
   ALL TESTS PASSED
 ```
@@ -343,12 +350,12 @@ Per-test output: [tb_x76489](doc/readme/tb_x76489_log.md)
 
 ## VGM Playback
 
-A VGM playback testbench is included for validating the chip against real game audio. VGM files carry timestamped SN76489 writes (command `0x50`, clock at header offset `0x0C`). The testbench replays the writes through the x76489 on its bus and captures `AOUT` at 44.1 kHz; `wav_batch.py` writes the WAV files. Each write holds `CSn` and `WRn` low for one `CEN` pulse, outside the sample count, and each 44.1 kHz sample is floor(chip clock / 44100) `CEN` pulses (81 when the header gives no clock).
+A VGM playback testbench is included for validating the chip against real game audio. VGM files carry timestamped SN76489 writes (command `0x50`, clock at header offset `0x0C`). The testbench replays the writes through the x76489 on its bus and captures `AOUT` at 44.1 kHz; `wav_batch.py` writes the WAV files. Each write holds `CSn` and `WRn` low until `READY` rises, 32 `CEN` pulses of chip time that the following samples give back, and each 44.1 kHz sample runs the chip clock over 44100 `CEN` pulses with the remainder carried, so the chip runs at its clock on average. A VGM whose header describes another part (the Sega VDP PSG's noise, XNOR noise, no /8 divider, the T6W28) is skipped with the reason.
 
 <table align="center">
   <tr>
     <td align="center" style="padding: 10px;">
-      <img align="center" src="img/20260329_x76489_vgm.png">
+      <img align="center" src="img/20261009_x76489_vgm.png">
     </td>
   </tr>
 </table>
@@ -371,7 +378,7 @@ vsim -c tb_x76489_vgm -do "run -all; quit -f"
 python sim/scripts/wav_batch.py
 ```
 
-WAV files are written to `sim/output/wav/` with names derived from the source VGM filenames. The testbench takes the chip clock of each track from its VGM header, or 3.58 MHz when the header gives none.
+WAV files are written to `sim/output/wav/` with names derived from the source VGM filenames. The testbench takes the chip clock of each track from its VGM header, or 3.579545 MHz when the header gives none.
 
 ### Pipeline
 
@@ -388,14 +395,14 @@ WAV files are written to `sim/output/wav/` with names derived from the source VG
 - [TI SN76489AN Data Sheet](doc/00_SN76489AN_Datasheet.pdf)<br>
   <small><i>(The typeset edition of the same data sheet)</i></small>
 - [TI SN76494, SN76494A, SN76496, SN76496A Programmable Tone/Noise Generator, D2801, June 1984, revised January 1989](doc/01_SN76494_SN76496_Datasheet.pdf)<br>
-  <small><i>(Description and Functional Block Diagram, p. 4-37; Pin Assignments and Functions, Tone Generators, p. 4-40; Table 1, Noise Generator, Tables 2 and 3, Output Buffer/Amplifier, p. 4-41)</i></small>
+  <small><i>(Description and Functional Block Diagram, p. 4-37; Pin Assignments and Functions, Tone Generators, p. 4-40; Table 1, Noise Generator, Tables 2 and 3, Output Buffer/Amplifier, p. 4-41; Microcomputer Parallel Port Interface, Figure 4, p. 4-44)</i></small>
 - [TI-99/4A Servicing Manual, October 1983, TMS 9919 Section](doc/03_TI_99-4A_Servicing_Manual_TMS9919_Section_Oct1983.pdf)<br>
   <small><i>(Key Features, p. 6; Sound Generation Controller, pp. 73-77)</i></small>
 - [TI-99/4 New Technician Guide, 1979, TMS 9919 Pages](doc/04_TI_99-4_New_Technician_Guide_TMS9919_Pages_1979.pdf)<br>
   <small><i>(TIM 9919 Architecture, Figure 6; Sound Generation; Test Set Error Tables)</i></small>
 - [VGM File Format Specification 1.71](https://vgmrips.net/wiki/VGM_Specification)<br>
   <small><i>(Header offset 0x0C, command 0x50)</i></small>
-- [TI SN76489AN Die Schematic](doc/05_TI_SN76489AN_RE_Schematic.pdf)<br>
+- [TI SN76489AN Die Schematic](https://github.com/ika-musume/IKA76489/blob/main/SN76489.pdf)<br>
   <small><i>(TONE: the period of 0; NOISE: the register length, taps, seed and periodic mode; DATA WRITE CONTROL: the write timer, READY and the register strobe on every byte)</i></small>
 
 ## License

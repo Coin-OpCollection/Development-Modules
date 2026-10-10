@@ -15,9 +15,10 @@
 //============================================================================
 //  Texas Instruments SN76489AN digital complex sound generator: three
 //  programmable tone generators, a white and periodic noise generator and
-//  four attenuators, summed into one audio output [p.1-3]. The tone
-//  generators (x76489_tone) and the noise generator (x76489_noise) are
-//  instantiated internally.
+//  four attenuators, summed into one audio output [p.1-3]. The bus
+//  controller and control registers (x76489_host), the tone generators
+//  (x76489_tone) and the noise generator (x76489_noise) are instantiated
+//  internally.
 //
 //  Clocking:
 //    CEN is one pulse per input clock (CLOCK, 3.579 MHz typ, 4 MHz max
@@ -29,22 +30,27 @@
 //    - CSn, WRn: CE and WE, active low [p.5-6]
 //    - DIN: D0-D7. TI numbers D0 as the MSB, so DIN[7] is D0 (pin 3), the
 //      latch flag, and DIN[0] is D7 (pin 10) [p.4], [p.6]
+//    - READY: READY, low while CSn is low until the byte loads [p.5-6]; on
+//      the chip an open collector output, here driven both ways
 //    - RESETn: the chip has no reset pin [p.6]; RESETn sets each tone
 //      register to 1, each attenuation to OFF and the noise control to
 //      white noise at N/512
 //    - AOUT: AUDIO OUT, the four channels summed, 8 bits unsigned
 //
 //  Write Timing:
-//    A byte is taken on a CLK with CEN high while CSn and WRn are both
-//    low. The chip takes about 32 clocks to load a byte and holds READY
-//    low meanwhile [p.5]; here the byte is loaded at once and READY is not
-//    provided.
+//    A write starts on the first CLK on which CSn and WRn are both low,
+//    and the byte on DIN is taken then. It is loaded on the CLK of the 32nd
+//    CEN pulse of the write; READY is low while CSn is low until then
+//    [p.5]. A write held 32 more CEN pulses after its byte is loaded starts
+//    another (SN76494/SN76496 Data Sheet, p. 4-40), and a write that starts
+//    during a transfer loads after it.
 //
 //  Registers:
 //    A latch byte (D0 = 1) selects one of eight registers by R0-R2 and
 //    loads its low bits; a data byte (D0 = 0) loads F0-F5 of a latched
-//    tone frequency or A0-A3 of a latched attenuation, so a frequency can
-//    be swept with data bytes alone [p.3-4].
+//    tone frequency, A0-A3 of a latched attenuation or FB, NF0 and NF1 of
+//    the latched noise control, so a frequency can be swept with data
+//    bytes alone [p.3-4].
 //
 //  Tone Generators:
 //    Each 10-bit counter steps on pre_cen; at zero it reloads with n - 1
@@ -55,8 +61,8 @@
 //  Noise Generator:
 //    A 15-stage shift register shifted at N/512, N/1024, N/2048 or on the
 //    tone 3 output, giving white noise (FB = 1) or periodic noise (FB = 0)
-//    (Tables 2 and 3 [p.3]). A latch byte to the noise control register
-//    reseeds it [p.3].
+//    (Tables 2 and 3 [p.3]). A byte to the noise control register reseeds
+//    it [p.3].
 //
 //  Audio Output:
 //    Each channel is its attenuated level while its output is high and 0
@@ -66,15 +72,17 @@
 //    level [p.3], [p.8]; here it is 0.
 //
 //  The data sheet gives the formats, the rates and the attenuation weights:
-//  n = 0, data bytes to an attenuation, the shift register taps, its seed
-//  and the periodic mode come from the die (TI SN76489AN die schematic,
-//  TONE, NOISE and DATA WRITE CONTROL).
+//  n = 0, data bytes to an attenuation or the noise control, the shift
+//  register taps, its seed and the periodic mode come from the die (TI
+//  SN76489AN die schematic, TONE, NOISE and DATA WRITE CONTROL).
 //
 //  Reference: TI SN76489AN Data Sheet, Advanced Circuits, November 1981,
 //             Features [p.1], Operation [p.2-5], Pin Assignment [p.6],
 //             Electrical Characteristics [p.7], External Audio Output
 //             Interface [p.8], Switching Characteristics [p.9], Block
 //             Diagram [p.10], Figure 4 [p.11].
+//             TI SN76494, SN76494A, SN76496, SN76496A Data Sheet D2801, WE,
+//             p. 4-40.
 //             TI SN76489AN die schematic, TONE, NOISE.
 //============================================================================
 
@@ -90,6 +98,7 @@ module x76489 (
     input  wire [7:0] DIN,
     input  wire       CSn,
     input  wire       WRn,
+    output wire       READY,
 
     // Audio Output
     output reg  [7:0] AOUT
@@ -139,110 +148,82 @@ always @(posedge CLK) begin
 end
 
 //========================================================================
-// Control Registers:
-// A latch byte (DIN[7] = 1) loads latch_reg from R0-R2 and the low bits
-// of the register it selects; a data byte loads F0-F5 of a latched tone
-// frequency (Data Formats [p.4]) or A0-A3 of a latched attenuation, which
-// the data sheet does not show: on the die every byte strobes the latched
-// register (TI SN76489AN die schematic, DATA WRITE CONTROL). Register
-// select (Table 4 [p.4]):
-//   000 tone 1 frequency    001 tone 1 attenuation
-//   010 tone 2 frequency    011 tone 2 attenuation
-//   100 tone 3 frequency    101 tone 3 attenuation
-//   110 noise control       111 noise attenuation
-// tone_freq holds F0-F9, F9 in bit 0, and noise_ctrl {FB, NF0, NF1}. A
-// latch byte to the noise control register raises restart_noise for one
-// CLK.
+// Bus Controller and Control Registers:
+// Each write loads its byte on the 32nd CEN pulse after it starts, with
+// READY low while CSn is low until then; the registers are the tone
+// periods, the attenuations and the noise control [p.3-5].
 //========================================================================
-reg [2:0] latch_reg;
-reg [9:0] tone_freq [0:2];
-reg [3:0] ch_attn [0:3];
-reg [2:0] noise_ctrl;
-reg       restart_noise;
+wire [9:0] tone_freq0;
+wire [9:0] tone_freq1;
+wire [9:0] tone_freq2;
+wire [3:0] ch_attn0;
+wire [3:0] ch_attn1;
+wire [3:0] ch_attn2;
+wire [3:0] ch_attn3;
+wire [2:0] noise_ctrl;
+wire       restart_noise;
 
-always @(posedge CLK) begin
-    if(rst) begin
-        latch_reg <= 3'd0;
-        tone_freq[0] <= 10'd1;
-        tone_freq[1] <= 10'd1;
-        tone_freq[2] <= 10'd1;
-        ch_attn[0] <= 4'hF;
-        ch_attn[1] <= 4'hF;
-        ch_attn[2] <= 4'hF;
-        ch_attn[3] <= 4'hF;
-        noise_ctrl <= 3'b100;
-        restart_noise <= 1'b0;
-    end else begin
-        restart_noise <= 1'b0;
-        if(CEN && !CSn && !WRn) begin
-            if(DIN[7]) begin
-                latch_reg <= DIN[6:4];
-                case(DIN[6:4])
-                    3'b000 : tone_freq[0][3:0] <= DIN[3:0];
-                    3'b001 : ch_attn[0] <= DIN[3:0];
-                    3'b010 : tone_freq[1][3:0] <= DIN[3:0];
-                    3'b011 : ch_attn[1] <= DIN[3:0];
-                    3'b100 : tone_freq[2][3:0] <= DIN[3:0];
-                    3'b101 : ch_attn[2] <= DIN[3:0];
-                    3'b110 : begin
-                        noise_ctrl <= DIN[2:0];
-                        restart_noise <= 1'b1;
-                    end
-                    3'b111 : ch_attn[3] <= DIN[3:0];
-                endcase
-            end else begin
-                case(latch_reg)
-                    3'b000 : tone_freq[0][9:4] <= DIN[5:0];
-                    3'b001 : ch_attn[0] <= DIN[3:0];
-                    3'b010 : tone_freq[1][9:4] <= DIN[5:0];
-                    3'b011 : ch_attn[1] <= DIN[3:0];
-                    3'b100 : tone_freq[2][9:4] <= DIN[5:0];
-                    3'b101 : ch_attn[2] <= DIN[3:0];
-                    3'b111 : ch_attn[3] <= DIN[3:0];
-                    default : ;
-                endcase
-            end
-        end
-    end
-end
+x76489_host u_host (
+    // Clock and Reset
+    .clk        ( CLK           ),
+    .rst        ( rst           ),
+    .cen        ( CEN           ),
+
+    // Control Interface
+    .din        ( DIN           ),
+    .cs_n       ( CSn           ),
+    .wr_n       ( WRn           ),
+    .ready      ( READY         ),
+
+    // Register Interface
+    .tone0      ( tone_freq0    ),
+    .tone1      ( tone_freq1    ),
+    .tone2      ( tone_freq2    ),
+    .attn0      ( ch_attn0      ),
+    .attn1      ( ch_attn1      ),
+    .attn2      ( ch_attn2      ),
+    .attn3      ( ch_attn3      ),
+    .noise_ctrl ( noise_ctrl    ),
+    .restart    ( restart_noise )
+);
 
 //========================================================================
 // Tone Generators:
-// Tone 1-3 from tone_freq [p.2].
+// Tone 1-3 from tone_freq0-tone_freq2 [p.2].
 //========================================================================
 wire tone_out [0:2];
 
 x76489_tone u_tone0 (
     // Clock and Reset
-    .clk     ( CLK          ),
-    .rst     ( rst          ),
-    .pre_cen ( pre_cen      ),
+    .clk     ( CLK         ),
+    .rst     ( rst         ),
+    .pre_cen ( pre_cen     ),
 
     // Tone Interface
-    .period  ( tone_freq[0] ),
-    .out     ( tone_out[0]  )
+    .period  ( tone_freq0  ),
+    .out     ( tone_out[0] )
 );
 
 x76489_tone u_tone1 (
     // Clock and Reset
-    .clk     ( CLK          ),
-    .rst     ( rst          ),
-    .pre_cen ( pre_cen      ),
+    .clk     ( CLK         ),
+    .rst     ( rst         ),
+    .pre_cen ( pre_cen     ),
 
     // Tone Interface
-    .period  ( tone_freq[1] ),
-    .out     ( tone_out[1]  )
+    .period  ( tone_freq1  ),
+    .out     ( tone_out[1] )
 );
 
 x76489_tone u_tone2 (
     // Clock and Reset
-    .clk     ( CLK          ),
-    .rst     ( rst          ),
-    .pre_cen ( pre_cen      ),
+    .clk     ( CLK         ),
+    .rst     ( rst         ),
+    .pre_cen ( pre_cen     ),
 
     // Tone Interface
-    .period  ( tone_freq[2] ),
-    .out     ( tone_out[2]  )
+    .period  ( tone_freq2  ),
+    .out     ( tone_out[2] )
 );
 
 //========================================================================
@@ -271,10 +252,10 @@ x76489_noise u_noise (
 // is bits 11-4 of the sum of the four, registered. The chip sums the
 // four in its output amplifier [p.3].
 //========================================================================
-wire [9:0] vol0 = tone_out[0] ? attn_vol(ch_attn[0]) : 10'd0;
-wire [9:0] vol1 = tone_out[1] ? attn_vol(ch_attn[1]) : 10'd0;
-wire [9:0] vol2 = tone_out[2] ? attn_vol(ch_attn[2]) : 10'd0;
-wire [9:0] vol3 = noise_out ? attn_vol(ch_attn[3]) : 10'd0;
+wire [9:0] vol0 = tone_out[0] ? attn_vol(ch_attn0) : 10'd0;
+wire [9:0] vol1 = tone_out[1] ? attn_vol(ch_attn1) : 10'd0;
+wire [9:0] vol2 = tone_out[2] ? attn_vol(ch_attn2) : 10'd0;
+wire [9:0] vol3 = noise_out ? attn_vol(ch_attn3) : 10'd0;
 
 wire [11:0] master_sum = vol0 + vol1 + vol2 + vol3;
 

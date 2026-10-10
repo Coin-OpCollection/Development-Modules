@@ -32,9 +32,8 @@
 //    python sim/scripts/wav_batch.py
 //
 //  Playlist (32-bit words, one per line, sim/output/vgm_hex/):
-//    3_CCCCCCC  track start: C = CEN pulses per 44.1 kHz sample, the chip
-//               clock of the VGM header over 44100, rounded down (81,
-//               3.58 MHz, when the header gives no clock)
+//    3_CCCCCCC  track start: C = the chip clock in Hz, from the VGM header
+//               (3579545 when the header gives none)
 //    1_00000DD  write the byte DD
 //    2_WWWWWWW  wait W samples
 //    0_0000000  end of track
@@ -42,12 +41,14 @@
 //
 //  Clocking:
 //    CLK has a 10 ns period. CEN is driven only by the bench: one pulse is
-//    two CLK, CEN high on the first. Each 44.1 kHz sample is C CEN pulses,
-//    so the chip runs at 44100 x C input clocks per second.
+//    two CLK, CEN high on the first. Each 44.1 kHz sample adds C to an
+//    accumulator and runs one CEN pulse per 44100 in it, the remainder
+//    carried, so the chip runs at C input clocks per second on average.
 //
 //  Write Timing:
-//    A write holds CSn and WRn low with CEN high for one CLK, so each write
-//    takes one CEN pulse outside the sample count.
+//    A write holds CSn and WRn low, running CEN, until READY rises, 32 CEN
+//    pulses later, as a CPU on the WAIT line does. Those pulses are chip
+//    time: the samples after the write run that many fewer.
 //
 //  Track Start and End:
 //    Each track starts with RESETn low for 100 ns and one CEN pulse after
@@ -83,6 +84,7 @@ reg        CEN;
 reg  [7:0] DIN;
 reg        CSn;
 reg        WRn;
+wire       READY;
 wire [7:0] AOUT;
 
 initial CLK = 1'b0;
@@ -101,6 +103,7 @@ x76489 uut (
     .DIN    ( DIN    ),
     .CSn    ( CSn    ),
     .WRn    ( WRn    ),
+    .READY  ( READY  ),
 
     // Audio Output
     .AOUT   ( AOUT   )
@@ -108,9 +111,17 @@ x76489 uut (
 
 //=========================================================================
 // Helper Tasks:
-// cycle is one CEN pulse; write_byte one write; reset_system the reset at
-// a track start.
+// cycle is one CEN pulse; write_byte one write, its CEN pulses added to
+// debt; play_sample the CEN pulses of one 44.1 kHz sample less the debt,
+// then the sample to the track file; reset_system the reset at a track
+// start.
 //=========================================================================
+integer fd;
+integer total_samples;
+integer debt;
+integer acc;
+integer chip_clock;
+integer pulses;
 task cycle;
     begin
         @(posedge CLK);
@@ -130,12 +141,32 @@ task write_byte;
         DIN = d;
         CSn = 1'b0;
         WRn = 1'b0;
-        CEN = 1'b1;
+        #1;
+        while(READY !== 1'b1) begin
+            cycle();
+            debt = debt + 1;
+        end
         @(posedge CLK);
         #1;
         CSn = 1'b1;
         WRn = 1'b1;
-        CEN = 1'b0;
+    end
+endtask
+
+task play_sample;
+    integer c;
+    begin
+        acc = acc + chip_clock;
+        pulses = acc / 44100;
+        acc = acc - pulses * 44100;
+        if(debt >= pulses) begin
+            debt = debt - pulses;
+        end else begin
+            for(c = 0; c < pulses - debt; c = c + 1) cycle();
+            debt = 0;
+        end
+        $fwrite(fd, "%c", AOUT);
+        total_samples = total_samples + 1;
     end
 endtask
 
@@ -158,13 +189,9 @@ endtask
 //=========================================================================
 reg [31:0] playlist [0:MAX_CMDS-1];
 
-integer fd;
 integer cmd_idx;
 integer track_num;
-integer total_samples;
-integer cen_per_sample;
 integer wait_samples;
-integer cen_count;
 integer s;
 integer done;
 integer track_active;
@@ -196,11 +223,10 @@ initial begin
             // track start
             4'h3 : begin
                 track_num = track_num + 1;
-                cen_per_sample = playlist[cmd_idx][27:0];
-                $display("  [Track %0d] CEN/sample=%0d (clock=%0d Hz)",
-                         track_num, cen_per_sample, cen_per_sample * 44100);
+                chip_clock = playlist[cmd_idx][27:0];
+                $display("  [Track %0d] clock=%0d Hz", track_num, chip_clock);
 
-                $sformat(raw_filename, "sim/output/wav/track_%02d.raw", track_num);
+                $sformat(raw_filename, "sim/output/wav/track_%0d%0d.raw", track_num / 10, track_num % 10);
                 fd = $fopen(raw_filename, "wb");
 
                 if(fd == 0) begin
@@ -209,6 +235,8 @@ initial begin
                 end else begin
                     reset_system();
                     total_samples = 0;
+                    acc = 0;
+                    debt = 0;
                     track_active = 1;
 
                     while(track_active && cmd_idx < MAX_CMDS - 1) begin
@@ -223,11 +251,7 @@ initial begin
                                 write_byte(8'hBF);
                                 write_byte(8'hDF);
                                 write_byte(8'hFF);
-                                for(s = 0; s < DRAIN_LEN; s = s + 1) begin
-                                    for(cen_count = 0; cen_count < cen_per_sample; cen_count = cen_count + 1) cycle();
-                                    $fwrite(fd, "%c", AOUT);
-                                    total_samples = total_samples + 1;
-                                end
+                                for(s = 0; s < DRAIN_LEN; s = s + 1) play_sample();
 
                                 $fclose(fd);
                                 fd = 0;
@@ -245,15 +269,17 @@ initial begin
                             // wait
                             4'h2 : begin
                                 wait_samples = playlist[cmd_idx][27:0];
-                                for(s = 0; s < wait_samples; s = s + 1) begin
-                                    for(cen_count = 0; cen_count < cen_per_sample; cen_count = cen_count + 1) cycle();
-                                    $fwrite(fd, "%c", AOUT);
-                                    total_samples = total_samples + 1;
-                                end
+                                for(s = 0; s < wait_samples; s = s + 1) play_sample();
                             end
 
                             default : ;
                         endcase
+                    end
+
+                    if(track_active) begin
+                        $fclose(fd);
+                        fd = 0;
+                        $display("    ERROR: playlist ended inside the track");
                     end
                 end
             end

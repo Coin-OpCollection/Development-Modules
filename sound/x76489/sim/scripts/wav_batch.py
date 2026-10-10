@@ -9,8 +9,8 @@ Usage:
 Reads track_NN.raw files from sim/output/wav/, uses
 sim/output/vgm_hex/tracklist.txt to map track numbers to song names, and
 writes named WAV files. Raw files are deleted after successful conversion.
-The last FADE_LEN samples are faded linearly to 128, the WAV center, to
-prevent an end-of-file pop.
+No fade is applied: each track ends with the bench's drain, every channel
+OFF, at the IP's silence of 0.
 
 Raw stream format (per sample, 1 byte):
     AOUT   (8-bit unsigned, mono mix)
@@ -27,7 +27,6 @@ SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 SIM_DIR     = os.path.dirname(SCRIPT_DIR)
 WAV_DIR     = os.path.join(SIM_DIR, "output", "wav")
 TRACKLIST   = os.path.join(SIM_DIR, "output", "vgm_hex", "tracklist.txt")
-FADE_LEN    = 512
 
 
 def load_tracklist():
@@ -74,13 +73,6 @@ def main():
         raw_data = bytearray(open(raw_file, "rb").read())
         num_samples = len(raw_data)
         duration = num_samples / SAMPLE_RATE
-
-        # Fade last samples to WAV center (128) to avoid pop
-        fade = min(FADE_LEN, num_samples)
-        for i in range(fade):
-            idx = num_samples - fade + i
-            t = i / fade
-            raw_data[idx] = int(raw_data[idx] * (1.0 - t) + 128 * t)
 
         with wave.open(wav_file, "w") as wav:
             wav.setnchannels(1)
