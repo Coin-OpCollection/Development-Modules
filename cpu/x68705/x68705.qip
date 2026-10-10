@@ -5,3 +5,4 @@ set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) hdl/x68
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) hdl/x68705_io.v]
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) hdl/x68705_timer.v]
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) hdl/x68705_mem.v]
+set_global_assignment -name SDC_FILE [file join $::quartus(qip_path) hdl/sdc/x68705.sdc]

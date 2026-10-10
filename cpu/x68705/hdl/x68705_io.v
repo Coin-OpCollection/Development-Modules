@@ -146,10 +146,10 @@ always @(*) begin
     case(addr)
         ADDR_PA_DATA: dout = pa_o;
         ADDR_PB_DATA: dout = pb_o;
-        ADDR_PC_DATA: dout = {4'hF, pc_o};  // Upper 4 bits read as 1s
-        ADDR_PA_DDR: dout = pa_ddr;
-        ADDR_PB_DDR: dout = pb_ddr;
-        ADDR_PC_DDR: dout = {4'hF, pc_ddr}; // Upper 4 bits read as 1s
+        ADDR_PC_DATA: dout = {4'hF, pc_o}; // Upper 4 bits read as 1s
+        ADDR_PA_DDR,
+        ADDR_PB_DDR,
+        ADDR_PC_DDR: dout = 8'hFF;         // DDRs are write-only, read as $FF
         default: dout = 8'hFF;
     endcase
 end

@@ -1,10 +1,10 @@
-# x68705 Regression Log
+# x68705 Regression Log, CMOS Counts
 
-Full output of the `tb_x68705` testbench (158 tests across 19 sections). See [README.md](../../README.md#design-verification) for the section-by-section description.
+Full output of the `tb_x68705` testbench with `HMOS = 0`, checked against the CMOS cycle counts (175 tests across 19 sections). See [README.md](../../README.md#design-verification) for the section-by-section description.
 
 ```
 =============================================================
-  MC68705P3 Comprehensive MCU Testbench
+  MC68705P3/P5 Comprehensive MCU Testbench
   Reference: M6805/M146805 CMOS Family User's Manual
 =============================================================
 
@@ -204,31 +204,48 @@ PASS: IRQ: PC = $0300 (ISR) = 00000300
 PASS: IRQ: I = 1 = 00000001
 PASS: IRQ masked: PC = $0101 = 00000101
 PASS: IRQ masked: A = $11 (INCA ran) = 00000011
+PASS: IRQ latched, taken when I clears = 00000300
+PASS: IRQ edge: first interrupt taken = 00000300
+PASS: IRQ held: no retrigger = 00000101
 PASS: TIRQ entry timing = 10 cycles
 PASS: TIRQ: PC = $0400 (Timer ISR) = 00000400
-PASS: Priority: TIRQ > IRQ = 00000400
+PASS: Priority: IRQ > TIRQ = 00000300
 
 === SECTION 17: I/O Port Operations ===
 
 PASS: DDRA = $FF = 000000ff
 PASS: Port A output = $A5 = 000000a5
 PASS: Port B read = $5A = 0000005a
+PASS: DDRA read = $FF (write-only) = 000000ff
 
 === SECTION 18: Timer Operations ===
 
 PASS: TDR = $80 = 00000080
 PASS: TCR read = $C5 = 000000c5
+PASS: Timer /1: 20 cycles = 20 counts = 000000dc
+PASS: Timer /8: 64 cycles = 8 counts = 000000e8
+PASS: Timer gated: TIMER low, no count = 000000f0
+PASS: Timer gated: high, 10 counts = 000000e6
+PASS: Timer ext: 5 edges = 5 counts = 000000eb
+PASS: TCR at reset from MOR $27 = $67 = 00000067
+PASS: MOR mode: TCR read = $7F = 0000007f
+PASS: MOR: PSC ignored, TIMER gates = 0000007f
+PASS: MOR: TCR[5:0] still read 1s = 0000003f
+PASS: MOR: TIMER high passes clock = 00000001
 
 === SECTION 19: Memory Boundaries ===
 
 PASS: RAM[$10] = $11 = 00000011
 PASS: RAM[$7F] = $7F = 0000007f
+PASS: Stack: PCL pushed at $60 = 00000002
+PASS: Stack: PCH wraps to $7F = 00000001
+PASS: Stack: $5F untouched = 000000a5
 
 =============================================================
-  MC68705P3 Comprehensive Test Results
+  MC68705P3/P5 Comprehensive Test Results
 =============================================================
-  Total Tests:  158
-  Passed:       158
+  Total Tests:  175
+  Passed:       175
   Failed:       0
 =============================================================
   *** ALL TESTS PASSED ***

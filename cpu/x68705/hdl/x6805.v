@@ -193,7 +193,7 @@ wire [7:0] reg_ccr = {3'b111, cc_h, cc_i, cc_n, cc_z, cc_c};
 // This 32-byte stack area resides at the top of the 112-byte RAM.
 // Formula: Physical Address = $40 + SP = {7'b0000001, SP}
 //=========================================================================
-wire [12:0] sp_addr = {7'b0000001, reg_sp}; // $40 + reg_sp
+wire [12:0] sp_addr = {8'b00000011, reg_sp[4:0]}; // $60 + SP[4:0]: the six MSBs are 000011
 
 //=========================================================================
 // Interrupt Vector Addresses:
@@ -444,6 +444,29 @@ endfunction
 reg [2:0] hold_cnt; // Remaining hold cycles
 
 //=========================================================================
+// External Interrupt Latch:
+// INT is synchronized outside the core and latched here on its falling
+// edge (irq rising). The latch holds the request, masked or not, until the
+// external interrupt is taken; BIL and BIH read the pin level (MC68705P5
+// data sheet, Interrupts).
+//=========================================================================
+reg irq_prev;
+reg irq_latch;
+
+wire irq_take = cen && (hold_cnt == 3'd0) && (state == ST_FETCH) && !cc_i && irq_latch;
+
+always @(posedge clk) begin
+    if(rst) begin
+        irq_prev <= 1'b0;
+        irq_latch <= 1'b0;
+    end else begin
+        irq_prev <= irq;
+        if(irq && !irq_prev) irq_latch <= 1'b1;
+        else if(irq_take) irq_latch <= 1'b0;
+    end
+end
+
+//=========================================================================
 // Instruction Length Reference (bytes):
 //   1 byte:  Inherent, Indexed (no offset)
 //   2 bytes: Immediate, Direct, Indexed (8-bit), Relative, BSC
@@ -591,12 +614,13 @@ always @(posedge clk) begin
                 // Hardware Interrupt Check:
                 // Check for pending interrupts before instruction decode.
                 // Interrupts only serviced when I flag is clear.
-                // Timer interrupt (TIRQ) has priority over external (IRQ).
+                // The latched external interrupt has priority over the
+                // timer (MC68705P5 data sheet, Interrupts).
                 //-----------------------------------------------------
-                if(!cc_i && (tirq || irq)) begin
+                if(!cc_i && (tirq || irq_latch)) begin
                     // Hardware interrupt pending and enabled
-                    // Select vector (TIRQ has priority over IRQ)
-                    vec_addr <= tirq ? VEC_TIMER : VEC_IRQ;
+                    // Select vector (external INT before timer)
+                    vec_addr <= irq_latch ? VEC_IRQ : VEC_TIMER;
                     // Pulse interrupt acknowledge for one cycle
                     irq_ack <= 1'b1;
                     // Begin interrupt stacking sequence
@@ -1914,7 +1938,7 @@ always @(posedge clk) begin
             ST_RTS_IDLE1: begin
                 if(op_type == OP_RTI) begin
                     reg_x <= din;
-                    addr <= {7'b0000001, reg_sp + 6'd1};
+                    addr <= {8'b00000011, reg_sp[4:0] + 5'd1};
                 end else begin
                     addr <= sp_addr;
                 end
@@ -1931,7 +1955,7 @@ always @(posedge clk) begin
                 ea[12:8] <= din[4:0];
                 if(op_type == OP_RTI) begin
                     reg_sp <= reg_sp + 1;
-                    addr <= {7'b0000001, reg_sp + 6'd1};
+                    addr <= {8'b00000011, reg_sp[4:0] + 5'd1};
                 end else begin
                     addr <= sp_addr;
                 end
@@ -2019,7 +2043,7 @@ always @(posedge clk) begin
                 cc_z <= din[1];
                 cc_c <= din[0];
                 reg_sp <= reg_sp + 1;
-                addr <= {7'b0000001, reg_sp + 6'd1};
+                addr <= {8'b00000011, reg_sp[4:0] + 5'd1};
                 rd <= 1'b1;
                 state <= ST_RTI_PULL3;
             end
@@ -2027,7 +2051,7 @@ always @(posedge clk) begin
             ST_RTI_PULL3: begin
                 reg_a <= din;
                 reg_sp <= reg_sp + 1;
-                addr <= {7'b0000001, reg_sp + 6'd1};
+                addr <= {8'b00000011, reg_sp[4:0] + 5'd1};
                 rd <= 1'b1;
                 state <= ST_RTS_IDLE1;
             end

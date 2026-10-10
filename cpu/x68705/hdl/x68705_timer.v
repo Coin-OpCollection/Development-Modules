@@ -26,13 +26,19 @@
 //  truncation-free counting.
 //
 //  Timer input modes (TCR[5:4]):
-//    00 - Internal clock (instruction cycle clock)
+//    00 - Internal clock: one count per machine cycle (cen), the phi2
+//         clock at fosc / 4
 //    01 - Internal clock AND TIMER pin (gated, for pulse width measurement)
 //    10 - Disabled (no clock input)
-//    11 - External TIMER pin (for event counting)
+//    11 - External TIMER pin: one count per rising edge (event counting)
 //
 //  On EPROM devices, MOR[TOPT] determines whether TCR[5:0] are fixed from
-//  MOR (emulating mask-programmed devices) or software programmable.
+//  MOR (emulating mask-programmed devices) or software programmable. At
+//  reset TCR bits 0-2, 4 and 5 are loaded from the MOR, TIR is cleared and
+//  TIM is set. With TOPT = 1 the prescaler select and the clock source come
+//  from the MOR, TIE is held at 1, so the TIMER pin gates the internal clock
+//  (tie it high for an ungated clock), writes to TCR[5:0] have no effect and
+//  TCR[5:0] read as 1s.
 //
 //  Reference: MC68705P3 8-BIT EPROM Micro Computer Unit Data Sheet and
 //             M6805/M146805 CMOS Family User's Manual, Second Edition
@@ -99,12 +105,8 @@ reg [7:0] tdr;       // Timer Data Register (8-bit counter)
 reg [7:0] tcr;       // Timer Control Register
 reg [6:0] prescaler; // 7-bit prescaler
 
-// Edge detection for clock inputs
-reg fpin_last; // Last state of filtered pin input
-reg prmx_last; // Last state of prescaler mux output
-
-// Internal clock divider (generates slower clock from cen)
-reg [1:0] cen_div;
+// Edge detection for the external TIMER input
+reg tin_last; // Last state of the TIMER pin
 
 //------------------------------------------------------------------------
 // Timer Input Logic:
@@ -122,29 +124,30 @@ reg [1:0] cen_div;
 // When MOR[TOPT]=1, use MOR settings; otherwise use TCR settings
 wire use_mor = mor[TOPT];
 wire eff_tin = use_mor ? mor[TIN] : tcr[TIN];
-wire eff_tie = use_mor ? mor[TIE] : tcr[TIE];
+wire eff_tie = use_mor ? 1'b1 : tcr[TIE];
 
 // Timer clock input selection
-// fpin is the input to the prescaler
-// Internal clock is derived from cen_div[1] (divide by 4)
-wire int_clk = cen_div[1];
+// tick steps the prescaler: once per machine cycle (cen) from the internal
+// phi2 clock, gated by the TIMER pin with TIE = 1, or once per rising edge
+// of the TIMER pin in external mode. STOP halts the internal clock.
+wire int_tick = cen & ~tstop;
+wire ext_edge = timer_in & ~tin_last;
 
-// Timer input mode multiplexer
-wire fpin = (eff_tin == 1'b0 && eff_tie == 1'b0) ? int_clk : (eff_tin == 1'b0 && eff_tie == 1'b1) ? (int_clk & timer_in) : (eff_tin == 1'b1 && eff_tie == 1'b0) ? 1'b0 : timer_in;
+wire tick = (eff_tin == 1'b0 && eff_tie == 1'b0) ? int_tick : (eff_tin == 1'b0 && eff_tie == 1'b1) ? (int_tick & timer_in) : (eff_tin == 1'b1 && eff_tie == 1'b0) ? 1'b0 : ext_edge;
 
 //------------------------------------------------------------------------
-// Prescaler Output Multiplexer:
-// The 7-bit prescaler provides taps at each bit position. TCR[2:0]
-// (or MOR[2:0] when TOPT=1) selects which tap feeds the counter.
-// This provides divide ratios of 1, 2, 4, 8, 16, 32, 64, or 128.
+// Prescaler Output:
+// TCR[2:0] (or MOR[2:0] when TOPT=1) selects the divide ratio 1, 2, 4,
+// 8, 16, 32, 64 or 128. With a ratio of 1 the counter decrements on every
+// tick; otherwise it decrements when the selected prescaler stage rises.
 //------------------------------------------------------------------------
-wire [7:0] prescaler_taps = {prescaler, fpin}; // Bits 7:1 = prescaler, bit 0 = fpin
 
 // Effective prescaler select (MOR or TCR)
 wire [2:0] pres_sel = use_mor ? mor[2:0] : tcr[2:0];
 
-// Selected prescaler output (feeds counter decrement)
-wire prmx = prescaler_taps[pres_sel];
+wire [6:0] pres_next = prescaler + 7'd1;
+wire [2:0] pres_bit = pres_sel - 3'd1;
+wire dec = tick & ((pres_sel == 3'd0) | (pres_next[pres_bit] & ~prescaler[pres_bit]));
 
 //------------------------------------------------------------------------
 // Timer Interrupt Output:
@@ -163,36 +166,28 @@ wire [7:0] next_tdr = tdr - 8'd1;
 //------------------------------------------------------------------------
 // Timer Operation:
 // On reset: TDR=$FF, prescaler=$7F, TIM=1 (masked), TIR=0.
-// Prescaler increments on rising edge of input clock (fpin).
-// Counter decrements on rising edge of selected prescaler tap.
+// Prescaler steps on each tick.
+// Counter decrements on the selected prescaler output.
 // TIR is set when counter transitions through $00 (underflow).
 //------------------------------------------------------------------------
 always @(posedge clk) begin
     if(rst) begin
         // Reset state per datasheet
-        tdr <= 8'hFF;       // Counter = $FF
-        tcr <= 8'h40;       // TIM=1 (masked), TIR=0, others=0
+        tdr <= 8'hFF; // Counter = $FF
+        tcr <= {2'b01, mor[5:4], 1'b0, mor[2:0]}; // TIM=1, TIR=0, rest from MOR
         prescaler <= 7'h7F; // Prescaler = $7F
-        cen_div <= 2'b00;
-        fpin_last <= 1'b0;
-        prmx_last <= 1'b0;
+        tin_last <= 1'b0;
     end else begin
-        // Internal clock divider (runs unless STOP instruction)
-        if(cen && !tstop) begin
-            cen_div <= cen_div + 2'd1;
+        // Edge detection for the external TIMER input
+        tin_last <= timer_in;
+
+        // Prescaler steps on each tick
+        if(tick) begin
+            prescaler <= pres_next;
         end
 
-        // Edge detection for prescaler input
-        fpin_last <= fpin;
-        prmx_last <= prmx;
-
-        // Prescaler increments on rising edge of fpin
-        if(fpin && !fpin_last) begin
-            prescaler <= prescaler + 7'd1;
-        end
-
-        // Counter decrements on rising edge of selected prescaler tap
-        if(prmx && !prmx_last) begin
+        // Counter decrements on the selected prescaler output
+        if(dec) begin
             tdr <= next_tdr;
             // Set TIR when counter underflows (transitions to $00)
             if(next_tdr == 8'h00) begin
@@ -210,14 +205,15 @@ always @(posedge clk) begin
                 // TIR and TIM are always writable
                 // TCR[5:0] may come from MOR if TOPT is set
                 if(use_mor) begin
-                    tcr <= {din[7:6], mor[5:0]};
+                    tcr[7:6] <= din[7:6];
                 end else begin
                     tcr <= din;
                 end
 
                 // Prescaler clear: writing 1 to bit 3 clears prescaler
                 // This allows truncation-free counting when changing settings
-                if(din[PSC]) begin
+                // (software controlled mode only)
+                if(din[PSC] && !use_mor) begin
                     prescaler <= 7'h00;
                 end
             end
@@ -228,7 +224,8 @@ end
 //------------------------------------------------------------------------
 // Register Read:
 // TDR returns current counter value (can be read without disturbing count).
-// TCR returns control/status bits; PSC (bit 3) always reads as 0.
+// TCR returns control/status bits; PSC (bit 3) reads as 0. With TOPT = 1
+// TCR[5:0] read as 1s.
 //------------------------------------------------------------------------
 always @(*) begin
     if(addr == 1'b0) begin
@@ -236,8 +233,9 @@ always @(*) begin
         dout = tdr;
     end else begin
         // TCR read ($09)
-        // Bit 3 (PSC) always reads as 0
-        dout = {tcr[7:4], 1'b0, tcr[2:0]};
+        // Bit 3 (PSC) reads as 0; with TOPT = 1, bits 5-0 read as 1s
+        if(use_mor) dout = {tcr[7:6], 6'b111111};
+        else dout = {tcr[7:4], 1'b0, tcr[2:0]};
     end
 end
 

@@ -1,4 +1,4 @@
-# x68705 - MC68705P3 Verilog Implementation
+# x68705 - MC68705P3/P5 Verilog Implementation
 
 <table align="center">
   <tr>
@@ -10,7 +10,7 @@
 
 ## x68705 Overview
 
-The **x68705** is a fully synchronous, cycle-accurate Verilog implementation of the Motorola MC68705P3 8-bit EPROM microcomputer unit. Built on the M6805 family core architecture, this implementation provides a functional equivalent of the MC68705P3 for FPGA-based applications.
+The **x68705** is a fully synchronous, cycle-accurate Verilog implementation of the Motorola MC68705P3 and MC68705P5 8-bit EPROM microcomputer units. Built on the M6805 family core architecture, this implementation provides a functional equivalent of the MC68705P3 and MC68705P5 for FPGA-based applications.
 
 ### Features
 
@@ -21,6 +21,7 @@ The **x68705** is a fully synchronous, cycle-accurate Verilog implementation of 
 - **Complete Instruction Set**: All 62 unique operations (202 valid opcodes) implemented across 10 addressing modes.
 - **Integrated Peripherals**: I/O ports, timer/counter, and internal RAM included.
 - **M6805 Family Compatible**: Core architecture shared across the M6805 family.
+- **Timing Constraints**: The IP ships an SDC file that relaxes its `cen`-paced paths from one setting in the core SDC. See [Timing Constraints](#timing-constraints).
 
 </small>
 
@@ -32,45 +33,46 @@ The **x68705** is a fully synchronous, cycle-accurate Verilog implementation of 
 | 2 | [Module Hierarchy](#module-hierarchy) | Source-file listing with each module's role and approximate line count |
 | 3 | [Memory Map](#memory-map) | Address layout: I/O registers, internal RAM, EPROM, and interrupt vectors |
 | 4 | [Register Set](#register-set) | Programmer-visible registers (A / X / PC / SP / CCR) and the condition-code flag layout |
-| 5 | [Instruction Set](#instruction-set) | Ten addressing modes, per-group cycle-timing tables, and the full annotated MC68705P3 opcode map |
+| 5 | [Instruction Set](#instruction-set) | Ten addressing modes, per-group cycle-timing tables, and the full annotated MC68705P3/P5 opcode map |
 | 6 | [Control Interface](#control-interface) | Verilog port-level reference: I/O ports A / B / C, IRQ, timer input, and the ROM bus |
 | 7 | [Control Registers](#control-registers) | Timer Control Register (TCR) and Mask Option Register (MOR) bit-field layouts |
-| 8 | [Design Usage](#design-usage) | Instantiation template, bus signal timing rules, and interrupt handling priority |
-| 9 | [M6805 Family Roadmap](#m6805-family-roadmap) | Position of x68705 in the planned M6805 family IP set |
-| 10 | [Project Structure](#project-structure) | Directory tree of the IP package |
-| 11 | [Design Verification](#design-verification) | Testbench section breakdown, run command, ModelSim screenshot, and final summary box. Per-test log: [tb_x68705](doc/readme/tb_x68705_log.md). |
-| 12 | [Design References](#design-references) | Hardware manuals and datasheets used as the implementation reference |
-| 13 | [License](#license) | Creative Commons Attribution-NonCommercial 4.0 International |
-| 14 | [Support](#support) | Back ongoing Coin-Op Collection FPGA core development on Patreon |
+| 8 | [Design Usage](#design-usage) | Instantiation template, RAM customization, and timing constraints |
+| 9 | [Device Usage](#device-usage) | FPGA resource usage, timing and Fmax of a standalone compile on two Cyclone V parts |
+| 10 | [M6805 Family Roadmap](#m6805-family-roadmap) | Position of x68705 in the planned M6805 family IP set |
+| 11 | [Project Structure](#project-structure) | Directory tree of the IP package |
+| 12 | [Design Verification](#design-verification) | Testbench section breakdown, run command, ModelSim screenshot, and final summary box. Per-test logs: [CMOS](doc/readme/tb_x68705_cmos_log.md), [HMOS](doc/readme/tb_x68705_hmos_log.md). |
+| 13 | [Design References](#design-references) | Hardware manuals and datasheets used as the implementation reference |
+| 14 | [License](#license) | Creative Commons Attribution-NonCommercial 4.0 International |
+| 15 | [Support](#support) | Back ongoing Coin-Op Collection FPGA core development on Patreon |
 
 ## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         x68705_mcu                              │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                        x68705                             │  │
-│  │                                                           │  │
-│  │   ┌──────────┐    ┌──────────┐    ┌──────────────────┐    │  │
-│  │   │  x6805   │<-->│x6805_alu │    │    x68705_mem    │    │  │
-│  │   │          │    │          │    │  (112B RAM +     │    │  │
-│  │   │ 11-bit PC│    │ ADD, SUB │    │  Address Decode) │    │  │
-│  │   │  6-bit SP│    │ AND, ORA │    └────────┬─────────┘    │  │
-│  │   │  8-bit A │    │ EOR, COM │             │              │  │
-│  │   │  8-bit X │    │ Shifts   │             v              │  │
-│  │   │  5-bit CC│    │ Rotates  │    ┌──────────────────┐    │  │
-│  │   └────┬─────┘    └──────────┘    │   x68705_io      │    │  │
-│  │        │                          │  Port A (8-bit)  │    │  │
-│  │        v                          │  Port B (8-bit)  │    │  │
-│  │   ┌──────────┐                    │  Port C (4-bit)  │    │  │
-│  │   │x68705    │                    └──────────────────┘    │  │
-│  │   │_timer    │                                            │  │
-│  │   │ 8-bit TDR│    ┌────────────────────────────────────┐  │  │
-│  │   │ 7-bit PSC│    │      External ROM Interface        │  │  │
-│  │   └──────────┘    │    (1804B User + 115B Bootstrap)   │  │  │
-│  │                   └────────────────────────────────────┘  │  │
-│  └───────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                             x68705_mcu                           │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │                            x68705                          │  │
+│  │                                                            │  │
+│  │   ┌──────────┐    ┌──────────┐    ┌──────────────────┐     │  │
+│  │   │  x6805   │<-->│x6805_alu │    │    x68705_mem    │     │  │
+│  │   │          │    │          │    │  (112B RAM +     │     │  │
+│  │   │ 11-bit PC│    │ ADD, SUB │    │  Address Decode) │     │  │
+│  │   │  6-bit SP│    │ AND, ORA │    └────────┬─────────┘     │  │
+│  │   │  8-bit A │    │ EOR, COM │             │               │  │
+│  │   │  8-bit X │    │ Shifts   │             v               │  │
+│  │   │  5-bit CC│    │ Rotates  │    ┌──────────────────┐     │  │
+│  │   └────┬─────┘    └──────────┘    │   x68705_io      │     │  │
+│  │        │                          │  Port A (8-bit)  │     │  │
+│  │        v                          │  Port B (8-bit)  │     │  │
+│  │   ┌──────────┐                    │  Port C (4-bit)  │     │  │
+│  │   │x68705    │                    └──────────────────┘     │  │
+│  │   │_timer    │                                             │  │
+│  │   │ 8-bit TDR│    ┌────────────────────────────────────┐   │  │
+│  │   │ 7-bit PSC│    │      External ROM Interface        │   │  │
+│  │   └──────────┘    │    (1804B User + 115B Bootstrap)   │   │  │
+│  │                   └────────────────────────────────────┘   │  │
+│  └────────────────────────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ## Module Hierarchy
@@ -79,10 +81,10 @@ The **x68705** is a fully synchronous, cycle-accurate Verilog implementation of 
 |--------|-------------|-------|
 | `x68705_mcu.v` | Top-level MCU wrapper with MOR handling | ~135 |
 | `x68705.v` | Core integration (CPU, ALU, Memory, I/O, Timer) | ~245 |
-| `x6805.v` | Central processor with state machine | ~2110 |
+| `x6805.v` | Central processor with state machine | ~2130 |
 | `x6805_alu.v` | Combinational arithmetic logic unit | ~272 |
 | `x68705_io.v` | Parallel I/O ports with DDRs | ~158 |
-| `x68705_timer.v` | 8-bit timer with 7-bit prescaler | ~245 |
+| `x68705_timer.v` | 8-bit timer with 7-bit prescaler | ~250 |
 | `x68705_mem.v` | Address decoder and 112-byte RAM | ~162 |
 
 ## Memory Map
@@ -95,7 +97,7 @@ $000-$007   I/O Registers
   $003      Reserved (reads as $FF)
   $004      Port A DDR (write-only, reads as $FF)
   $005      Port B DDR (write-only, reads as $FF)
-  $006      Port C DDR (bits 3:0, write-only)
+  $006      Port C DDR (bits 3:0, write-only, reads as $FF)
   $007      Reserved (reads as $FF)
 
 $008-$009   Timer Registers
@@ -126,7 +128,7 @@ $7F8-$7FF   Interrupt Vectors
 | A | 8-bit | Accumulator - general purpose arithmetic/logic |
 | X | 8-bit | Index Register - indexed addressing and temporary storage |
 | PC | 11-bit | Program Counter - next instruction address ($000-$7FF) |
-| SP | 6-bit | Stack Pointer - maps to $40-$7F (reset: $3F → $7F) |
+| SP | 5-bit | Stack Pointer - the six MSBs are fixed at 000011, so it maps to $60-$7F and wraps (reset: $7F) |
 | CCR | 5-bit | Condition Code Register (H, I, N, Z, C) |
 
 ### Condition Code Register
@@ -302,7 +304,7 @@ In HMOS mode the state machine holds, right after the opcode decode, for the num
    └────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┴────┘
 ```
 
-*MUL ($42) is available only on HC05 variants, not implemented in MC68705P3*
+*MUL ($42) is available only on HC05 variants, not implemented in MC68705P3/P5*
 
 ## Control Interface
 
@@ -328,6 +330,8 @@ output wire [3:0] pc_o  // Port C output
 input  wire irq,    // External interrupt request (active high)
 output wire irq_ack // Pulsed interrupt acknowledge
 ```
+
+INT is latched on its falling edge (`irq` rising) and held, masked or not, until the interrupt is taken, so a held `irq` interrupts once. BIL and BIH read the `irq` level. With both pending, the external interrupt is served before the timer (MC68705P5 data sheet, Interrupts).
 
 ### Timer
 
@@ -359,6 +363,8 @@ output wire        rom_cs    // ROM chip select
   │   └────────────────────────── Timer Interrupt Mask (1=masked)
   └────────────────────────────── Timer Interrupt Request
 ```
+
+The internal clock is phi2, the machine cycle: the prescaler counts once per `cen` pulse, or once per rising edge of the TIMER pin in external mode. At reset TCR bits 0-2, 4 and 5 are loaded from the MOR, TIR is cleared and TIM is set. With MOR TOPT = 1 (mask-option emulation) the prescaler select and the clock source come from the MOR and TIE is held at 1, so the TIMER pin gates the internal clock (tie it high for an ungated clock); writes to TCR[5:0] and PSC have no effect, and TCR[5:0] read as 1s.
 
 ### Mask Option Register (MOR)
 
@@ -446,12 +452,59 @@ end
 assign ram_dout = ram_q;
 ```
 
+### Timing Constraints
+
+`x68705.qip` adds `hdl/sdc/x68705.sdc`, so every core that includes the IP reads it. It finds each x68705 instance by its module name and relaxes the `cen`-paced paths: the CPU registers and state machine, the port data latches and data direction registers, and the RAM. The external interrupt latch, the timer, the port pin registers and the MOR latch keep their single-cycle check. The core gives one number, the fewest `clk` cycles between two `cen` pulses, in its own SDC:
+
+```tcl
+# x68705 loads only on its machine-cycle enable, 3M divided by four, once every 128 system clocks.
+set x68705_cen_div 128
+```
+
+| Path | Setup | Hold |
+|------|-------|------|
+| `cen`-paced registers and the RAM to each other | `x68705_cen_div` | `x68705_cen_div` - 1 |
+
+- **Read order**: the core SDC must be read before `x68705.sdc`, so its `SDC_FILE` line goes above the `QIP_FILE` line that brings in the IP. A core that does not set `x68705_cen_div` gets a critical warning and no relaxation.
+- **Outside the IP**: paths between the part and the core's program ROM, and from the core's reset, are constrained in the core SDC.
+- **Ratio**: with a fractional `cen` divider use the shortest gap. With `cen` on every `clk` (`x68705_cen_div 1`) nothing is relaxed.
+
+## Device Usage
+
+A standalone compile of `x68705_mcu` in Quartus 22.1std, its ports as virtual pins, with a 96 MHz clock and the IP's SDC at `x68705_cen_div 128`. The program ROM is outside the IP.
+
+### Cyclone V 5CSEBA6U23I7
+
+| Module | ALMs | ALUTs | Registers | Block Memory Bits | M10K | DSP |
+|--------|------|-------|-----------|-------------------|------|-----|
+| `x68705_mcu` | 693.5 (1.7%) | 1,092 | 304 | 896 | 1 | 0 |
+| `x6805` | 506.8 | 832 | 215 | 0 | 0 | 0 |
+| `x6805_alu` | 57.5 | 98 | 0 | 0 | 0 | 0 |
+| `x68705_mem` | 35.2 | 58 | 0 | 896 | 1 | 0 |
+| `x68705_timer` | 30.5 | 59 | 23 | 0 | 0 | 0 |
+| `x68705_io` | 24.2 | 33 | 60 | 0 | 0 | 0 |
+
+Fmax 108.47 MHz. At 96 MHz: setup slack +1.197 ns, hold slack +0.163 ns.
+
+### Cyclone V 5CEBA4F23C8
+
+| Module | ALMs | ALUTs | Registers | Block Memory Bits | M10K | DSP |
+|--------|------|-------|-----------|-------------------|------|-----|
+| `x68705_mcu` | 692.0 (3.7%) | 1,092 | 304 | 896 | 1 | 0 |
+| `x6805` | 504.0 | 832 | 215 | 0 | 0 | 0 |
+| `x6805_alu` | 57.5 | 98 | 0 | 0 | 0 | 0 |
+| `x68705_mem` | 37.4 | 58 | 0 | 896 | 1 | 0 |
+| `x68705_timer` | 32.0 | 59 | 23 | 0 | 0 | 0 |
+| `x68705_io` | 20.7 | 33 | 60 | 0 | 0 | 0 |
+
+Fmax 102.08 MHz. At 96 MHz: setup slack +0.620 ns, hold slack +0.167 ns.
+
 ## M6805 Family Roadmap
 
 The x6805 CPU core implements the standard M6805 instruction set shared across the entire family. Future releases will expand support for additional variants:
 
-| Feature | MC68705P3 (Current) | MC68705P5 (Current) | MC68705R3 | MC68705U3 |
-|---------|---------------------|---------------------|-----------|-----------|
+| Feature | MC68705P3 (Current) | MC68705P5 (Current) | MC68705R3 (Future) | MC68705U3 (Future) |
+|---------|---------------------|---------------------|--------------------|--------------------|
 | CPU Core | ✓ Same | ✓ Same | ✓ Same | ✓ Same |
 | Port A | 8-bit | 8-bit | 8-bit | 8-bit |
 | Port B | 8-bit | 8-bit | 8-bit | 8-bit |
@@ -464,7 +517,7 @@ The x6805 CPU core implements the standard M6805 instruction set shared across t
 | MOR SNM Bit | No | Yes (not modeled) | No | No |
 | Instruction Timing | HMOS | HMOS | HMOS | HMOS |
 
-The MC68705P5 differs from the MC68705P3 only in MOR bit 3, SNM, the EPROM security bit, with its secure-mode signature at $782-$783 and the bootstrap lockout in secure mode. The memory map, registers, ports, timer, vectors, pinout, clock options and instruction timing are the same (MC68705P3 and MC68705P5 data sheets). With SNM = 0 a P5 image runs on x68705 unchanged; x68705 does not model the secure mode.
+The MC68705P5 differs from the MC68705P3 only in MOR bit 3, SNM, the EPROM security bit, with its secure-mode signature at $782-$783 and the bootstrap lockout in secure mode. The memory map, registers, ports, timer, vectors, pinout, clock options and instruction timing are the same (MC68705P3 and MC68705P5 data sheets). A P5 image runs on x68705 unchanged with SNM set or clear: secure mode only locks out the bootstrap/programming mode, which x68705 does not model.
 
 ## Project Structure
 
@@ -473,8 +526,8 @@ x68705/
 ├── doc/
 │   ├── 00_M6805_M146805_Users_Manual.pdf
 │   ├── 01_M68705P3_Datasheet.pdf
+│   ├── 02_MC68705P5_Datasheet.pdf
 │   └── M6805 Family/
-│       ├── 02_MC68705P5_Datasheet.pdf
 │       ├── 03_MC68705R3_Datasheet.pdf
 │       └── 04_MC68705U3_Datasheet.pdf
 ├── hdl/
@@ -483,7 +536,9 @@ x68705/
 │   ├── x6805_alu.v        # Arithmetic logic unit
 │   ├── x68705_io.v        # Parallel I/O ports
 │   ├── x68705_timer.v     # Timer/counter peripheral
-│   └── x68705_mem.v       # RAM and address decoder
+│   ├── x68705_mem.v       # RAM and address decoder
+│   └── sdc/
+│       └── x68705.sdc     # Multicycle constraints, read from x68705.qip
 ├── sim/
 │   ├── tb_x68705.v        # Comprehensive testbench
 │   └── tb_x68705_cycles.v # Cycle count of every opcode, HMOS and CMOS
@@ -500,8 +555,9 @@ The testbench (`tb_x68705.v`) provides comprehensive verification across 19 sect
 - **Instruction Coverage**: All 62 operations across 10 addressing modes
 - **Cycle Timing**: Verified against the User's Manual opcode map, CMOS counts with `HMOS = 0` and HMOS counts with `HMOS = 1`
 - **Flag Behavior**: H, I, N, Z, C flags tested per instruction
-- **Interrupt Handling**: IRQ, TIRQ, SWI with priority verification
-- **Peripheral Access**: I/O ports and timer register operations
+- **Interrupt Handling**: IRQ edge latch and masked requests, TIRQ, SWI, IRQ before TIRQ
+- **Peripheral Access**: I/O ports with DDR reads, timer registers, the timer count rate in every input mode, TCR from the MOR at reset, MOR controlled mode
+- **Stack**: $60-$7F with the wrap below $60
 
 </small>
 
@@ -511,7 +567,7 @@ vsim -c tb_x68705 -do "run -all"             # CMOS counts
 vsim -c -gHMOS=1 tb_x68705 -do "run -all"    # HMOS counts
 ```
 
-Both modes pass all 158 tests.
+Both modes pass all 175 tests.
 
 The cycle testbench (`tb_x68705_cycles.v`) runs each of the 207 defined opcodes and the /INT entry and checks the machine-cycle count of each against the opcode map: 208 checks, all passing, in both modes.
 
@@ -524,17 +580,17 @@ vsim -c -gHMOS=0 tb_x68705_cycles -do "run -all"  # CMOS counts
 <table align="center">
   <tr>
     <td align="center" style="padding: 10px;">
-      <img align="center" src="img/20260930_x68705.png">
+      <img align="center" src="img/20261010_x68705.png">
     </td>
   </tr>
 </table>
 
 ```
 =============================================================
-  MC68705P3 Comprehensive Test Results
+  MC68705P3/P5 Comprehensive Test Results
 =============================================================
-  Total Tests:  158
-  Passed:       158
+  Total Tests:  175
+  Passed:       175
   Failed:       0
 =============================================================
   *** ALL TESTS PASSED ***
@@ -542,12 +598,25 @@ vsim -c -gHMOS=0 tb_x68705_cycles -do "run -all"  # CMOS counts
 =============================================================
 ```
 
-Per-test output: [tb_x68705](doc/readme/tb_x68705_log.md)
+```
+=============================================================
+  MC68705P3/P5 Comprehensive Test Results
+=============================================================
+  Total Tests:  175
+  Passed:       175
+  Failed:       0
+=============================================================
+  *** ALL TESTS PASSED ***
+  Cycle-accurate to the HMOS counts of the M6805/M146805 manual
+=============================================================
+```
+
+Per-test output: [CMOS](doc/readme/tb_x68705_cmos_log.md), [HMOS](doc/readme/tb_x68705_hmos_log.md)
 
 ## Design References
 
 - [Motorola MC68705P3 8-BIT EPROM Micro Computer Unit Data Sheet](doc/01_M68705P3_Datasheet.pdf)
-- [Motorola MC68705P5 8-Bit EPROM Microcomputer Unit Data Sheet](doc/M6805%20Family/02_MC68705P5_Datasheet.pdf):<br>
+- [Motorola MC68705P5 8-Bit EPROM Microcomputer Unit Data Sheet](doc/02_MC68705P5_Datasheet.pdf):<br>
   <small><i>(Tables 1-5: HMOS instruction timing)</i></small>
 - [Motorola M6805/M146805 CMOS Family User's Manual, Second Edition](doc/00_M6805_M146805_Users_Manual.pdf):<br>
   <small><i>(Opcode map: HMOS/CMOS cycle columns; Appendix G: Tables G1 and G2)</i></small>

@@ -37,10 +37,13 @@
 //    Section 13: Jump instructions (JMP dir, JMP ext, JMP ,X)
 //    Section 14: Subroutine calls (JSR, BSR, RTS)
 //    Section 15: Interrupt instructions (SWI, RTI)
-//    Section 16: Hardware interrupts (IRQ, TIRQ, priority)
-//    Section 17: I/O port operations (DDR, data read/write)
-//    Section 18: Timer operations (TDR, TCR access)
-//    Section 19: Memory boundary tests (RAM limits)
+//    Section 16: Hardware interrupts (IRQ edge latch, masked request
+//                held, TIRQ, IRQ before TIRQ)
+//    Section 17: I/O port operations (DDR, data read/write, DDR reads $FF)
+//    Section 18: Timer operations (TDR, TCR access, count rate in every
+//                input mode, TCR from the MOR at reset, MOR controlled
+//                mode)
+//    Section 19: Memory boundary tests (RAM limits, stack wrap $60 to $7F)
 //
 //  Cycle Timing Reference (M146805 CMOS):
 //    Inherent:       2 cycles (1-byte)
@@ -356,7 +359,7 @@ endtask
 //=========================================================================
 initial begin
     $display("=============================================================");
-    $display("  MC68705P3 Comprehensive MCU Testbench");
+    $display("  MC68705P3/P5 Comprehensive MCU Testbench");
     $display("  Reference: M6805/M146805 CMOS Family User's Manual");
     $display("=============================================================\n");
 
@@ -1107,9 +1110,10 @@ initial begin
 
     //=====================================================================
     // SECTION 16: Hardware Interrupts
-    // Tests IRQ and timer interrupt handling. Interrupts are level-
-    // sensitive and checked between instructions. Priority: Timer > IRQ.
-    // Hardware interrupts masked when I bit = 1.
+    // Tests IRQ and timer interrupt handling. INT is latched on its
+    // falling edge (irq rising) and a masked request stays latched until
+    // it is taken; interrupts are checked between instructions. Priority:
+    // external INT > timer (MC68705P5 data sheet, Interrupts).
     //=====================================================================
     $display("\n=== SECTION 16: Hardware Interrupts ===\n");
 
@@ -1138,6 +1142,26 @@ initial begin
     check(uut.u_cpu.reg_a, 8'h11, "IRQ masked: A = $11 (INCA ran)");
     irq = 1'b0;
 
+    // The masked request stays latched and is taken once I clears, with
+    // the INT line already back high
+    setup_test(13'h0101);
+    uut.u_cpu.cc_i = 1'b0;
+    run_instruction();
+    check(uut.u_cpu.reg_pc, 13'h0300, "IRQ latched, taken when I clears");
+
+    // A held INT line interrupts once; a second needs a new falling edge
+    rom[11'h100] = 8'h9D;              // NOP
+    setup_test(13'h0100);
+    uut.u_cpu.cc_i = 1'b0;
+    irq = 1'b1;
+    run_instruction();
+    check(uut.u_cpu.reg_pc, 13'h0300, "IRQ edge: first interrupt taken");
+    setup_test(13'h0100);
+    uut.u_cpu.cc_i = 1'b0;
+    run_instruction();
+    check(uut.u_cpu.reg_pc, 13'h0101, "IRQ held: no retrigger");
+    irq = 1'b0;
+
     // Timer interrupt (TIRQ) when enabled
     rom[11'h100] = 8'h9D;
     rom[11'h400] = 8'h9D;              // NOP in timer ISR
@@ -1150,15 +1174,15 @@ initial begin
     check(uut.u_cpu.reg_pc, 13'h0400, "TIRQ: PC = $0400 (Timer ISR)");
     uut.u_timer.tcr[7] = 1'b0;         // Clear TIR
 
-    // TIRQ priority over IRQ
-    // Both pending, timer should be serviced first
+    // External INT priority over TIRQ
+    // Both pending, the external interrupt is serviced first
     setup_test(13'h0100);
     uut.u_cpu.cc_i = 1'b0;
     irq = 1'b1;
     uut.u_timer.tcr[7] = 1'b1;
     uut.u_timer.tcr[6] = 1'b0;
     run_instruction();
-    check(uut.u_cpu.reg_pc, 13'h0400, "Priority: TIRQ > IRQ");
+    check(uut.u_cpu.reg_pc, 13'h0300, "Priority: IRQ > TIRQ");
     irq = 1'b0;
     uut.u_timer.tcr[7] = 1'b0;
 
@@ -1194,6 +1218,14 @@ initial begin
     run_instruction();
     check(uut.u_cpu.reg_a, 8'h5A, "Port B read = $5A");
 
+    // DDRs are write-only and read as $FF (MC68705P3 data sheet, Figure 4)
+    rom[11'h100] = 8'hB6;              // LDA dir
+    rom[11'h101] = 8'h04;              // DDRA
+    setup_test(13'h0100);
+    uut.u_io.pa_ddr = 8'h0F;
+    run_instruction();
+    check(uut.u_cpu.reg_a, 8'hFF, "DDRA read = $FF (write-only)");
+
     //=====================================================================
     // SECTION 18: Timer Operations
     // Tests TDR ($08) and TCR ($09) register access. TDR is 8-bit
@@ -1216,6 +1248,86 @@ initial begin
     uut.u_timer.tcr = 8'hC5;
     run_instruction();
     check(uut.u_cpu.reg_a, 8'hC5, "TCR read = $C5");
+
+    // Timer rate: the internal source is phi2, one count per machine cycle
+    // (MC68705P3/P5 data sheets, Timer). The CPU spins on BRA * meanwhile.
+    rom[11'h100] = 8'h20;              // BRA *
+    rom[11'h101] = 8'hFE;
+    setup_test(13'h0100);
+    uut.u_timer.tcr = 8'h40;           // TIM = 1, internal clock, /1
+    uut.u_timer.tdr = 8'hF0;
+    repeat(20) cycle();
+    check(uut.u_timer.tdr, 8'hDC, "Timer /1: 20 cycles = 20 counts");
+    uut.u_timer.tcr = 8'h43;           // /8
+    uut.u_timer.prescaler = 7'h00;
+    uut.u_timer.tdr = 8'hF0;
+    repeat(64) cycle();
+    check(uut.u_timer.tdr, 8'hE8, "Timer /8: 64 cycles = 8 counts");
+    uut.u_timer.tcr = 8'h50;           // TIE = 1: gated by the TIMER pin
+    uut.u_timer.tdr = 8'hF0;
+    timer_in = 1'b0;
+    repeat(10) cycle();
+    check(uut.u_timer.tdr, 8'hF0, "Timer gated: TIMER low, no count");
+    timer_in = 1'b1;
+    repeat(10) cycle();
+    check(uut.u_timer.tdr, 8'hE6, "Timer gated: high, 10 counts");
+    uut.u_timer.tcr = 8'h70;           // TIN = 1, TIE = 1: external
+    uut.u_timer.tdr = 8'hF0;
+    for(i = 0; i < 5; i = i + 1) begin
+        timer_in = 1'b0;
+        cycle();
+        timer_in = 1'b1;
+        cycle();
+    end
+    check(uut.u_timer.tdr, 8'hEB, "Timer ext: 5 edges = 5 counts");
+    timer_in = 1'b0;
+    uut.u_timer.tcr = 8'h40;
+
+    // TCR bits 0-2, 4 and 5 are loaded from the MOR at reset; TIR is
+    // cleared and TIM set (software mode, TOPT = 0)
+    rst = 1'b1;
+    mor = 8'h27;                       // TOPT = 0, CLS = 1, P = 7
+    #100;
+    rst = 1'b0;
+    #50;
+    check(uut.u_timer.tcr, 8'h67, "TCR at reset from MOR $27 = $67");
+
+    // MOR controlled mode (TOPT = 1): TCR[5:0] read as 1s, writes to
+    // them and PSC have no effect, and TIE is held at 1, so the TIMER pin
+    // gates the internal clock
+    rst = 1'b1;
+    mor = 8'h45;                       // TOPT = 1, CLS = 0, P = 5
+    timer_in = 1'b0;
+    #100;
+    rst = 1'b0;
+    #50;
+    rom[11'h100] = 8'hB6;              // LDA dir
+    rom[11'h101] = 8'h09;              // TCR
+    setup_test(13'h0100);
+    run_instruction();
+    check(uut.u_cpu.reg_a, 8'h7F, "MOR mode: TCR read = $7F");
+    begin : mor_mode
+        reg [6:0] pre_before;
+        rom[11'h100] = 8'hB7;          // STA dir
+        rom[11'h101] = 8'h09;          // TCR
+        setup_test(13'h0100);
+        uut.u_cpu.reg_a = 8'h08;       // TIM = 0, PSC = 1
+        pre_before = uut.u_timer.prescaler;
+        run_instruction();
+        check(uut.u_timer.prescaler, pre_before, "MOR: PSC ignored, TIMER gates");
+        rom[11'h100] = 8'hB6;
+        setup_test(13'h0100);
+        run_instruction();
+        check(uut.u_cpu.reg_a, 8'h3F, "MOR: TCR[5:0] still read 1s");
+        timer_in = 1'b1;
+        rom[11'h100] = 8'h9D;          // NOP
+        setup_test(13'h0100);
+        run_instruction();
+        run_instruction();
+        check(uut.u_timer.prescaler != pre_before, 1, "MOR: TIMER high passes clock");
+    end
+    timer_in = 1'b0;
+    reset_system();
 
     //=====================================================================
     // SECTION 19: Memory Boundaries
@@ -1240,11 +1352,23 @@ initial begin
     run_instruction();
     check(uut.u_mem.ram[111], 8'h7F, "RAM[$7F] = $7F");
 
+    // The stack is $60-$7F: the six SP MSBs are 000011, so a push below
+    // $60 wraps to $7F (MC68705P5 data sheet, Stack Pointer)
+    rom[11'h100] = 8'hBD;              // JSR dir
+    rom[11'h101] = 8'h80;
+    setup_test(13'h0100);
+    uut.u_cpu.reg_sp = 6'h20;          // SP = $60
+    uut.u_mem.ram[8'h4F] = 8'hA5;      // $5F, below the stack
+    run_instruction();
+    check(uut.u_mem.ram[8'h50], 8'h02, "Stack: PCL pushed at $60");
+    check(uut.u_mem.ram[111] & 8'h07, 8'h01, "Stack: PCH wraps to $7F");
+    check(uut.u_mem.ram[8'h4F], 8'hA5, "Stack: $5F untouched");
+
     //=====================================================================
     // Final Test Summary
     //=====================================================================
     $display("\n=============================================================");
-    $display("  MC68705P3 Comprehensive Test Results");
+    $display("  MC68705P3/P5 Comprehensive Test Results");
     $display("=============================================================");
     $display("  Total Tests:  %0d", total_tests);
     $display("  Passed:       %0d", passed_tests);
