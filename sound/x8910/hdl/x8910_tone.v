@@ -13,47 +13,59 @@
 */
 
 //============================================================================
-//  Tone generator module for the AY-3-8910 Programmable Sound Generator.
+//  Tone generator for the General Instrument AY-3-8910 programmable sound
+//  generator. A 12-bit counter steps up on pre_cen, the input clock / 8;
+//  when it reaches or passes period it returns to 1 and toggles out, so
+//  out holds for period steps and the tone is f = f_CLOCK / (16 TP) for a
+//  tone period TP [p.18].
 //
-//  Implements a square wave generator with configurable period. The counter
-//  counts up at the base enable rate and toggles the output when the count
-//  reaches the programmed period, producing a 50% duty cycle square wave.
+//  Counter:
+//    The counter counts up, compares with greater-or-equal and restarts
+//    at 1, so a period of 0 acts as 1 and a period written below the
+//    count takes effect on the next step (AY-3-8910 die schematic). Reset
+//    sets the counter to 1 and out to 1.
 //
-//  Reference GI Data Manual, Section 3.1:
-//    - Counts UP at base enable rate (f_clock / 8)
-//    - Toggles output and resets counter to 1 when counter >= period
-//    - Period 0 and 1 both produce divide-by-1 (highest frequency)
-//    - Output is a square wave at f_clock / (16 * period)
+//  Parameters:
+//    PERIOD_BITS - counter and period width, 12 [p.18]
 //
-//  Reference lvd RE schematic:
-//    - Real AY-3-8910 counts UP (not down as stated in GI manual)
-//    - First flip-flop has UP_RST(0), resetting counter to 1 not 0
-//    - Changing period takes effect immediately (no reload delay)
+//  Reference: AY-3-8910/8912 Programmable Sound Generator Data Manual,
+//             Tone Generator Control [p.18].
+//             AY-3-8910 die schematic.
 //============================================================================
+
+`timescale 1ns/1ps
 
 module x8910_tone #(
     parameter PERIOD_BITS = 12
-) (
-    input  wire clk,
-    input  wire enable,
-    input  wire reset,
+)(
+    // Clock and Reset
+    input  wire                   clk,
+    input  wire                   rst,
+    input  wire                   pre_cen,
+
+    // Tone Interface
     input  wire [PERIOD_BITS-1:0] period,
-    output wire out
+    output wire                   out
 );
 
+//========================================================================
+// Counter:
+// At or past period the counter returns to 1 and state toggles.
+//========================================================================
 reg [PERIOD_BITS-1:0] counter;
+
 reg state;
 
 always @(posedge clk) begin
-    if(reset) begin
-        counter <= {{PERIOD_BITS-1{1'b0}}, 1'b1};     // Reset to 1 (per lvd RE: UP_RST)
-        state <= 1'b1;                                // Flip-flop set to 1 at reset
-    end else if(enable) begin
+    if(rst) begin
+        counter <= {{PERIOD_BITS-1{1'b0}}, 1'b1};
+        state <= 1'b1;
+    end else if(pre_cen) begin
         if(counter >= period) begin
-            counter <= {{PERIOD_BITS-1{1'b0}}, 1'b1}; // Reset to 1
-            state <= ~state;                          // Toggle output
+            counter <= {{PERIOD_BITS-1{1'b0}}, 1'b1};
+            state <= ~state;
         end else begin
-            counter <= counter + 1'b1;                // Count up
+            counter <= counter + 1'b1;
         end
     end
 end

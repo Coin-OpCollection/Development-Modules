@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
 """
-Convert all VGZ/VGM files in output/vgm/ to a single combined playlist
-hex file for the x8910 VGM playback testbench.
+Convert all VGZ/VGM files in sim/output/vgm/ to a single combined playlist
+hex file for the x8910 (GI AY-3-8910) VGM playback testbench.
 
 Usage:
-    python scripts/vgm2hex.py
+    python sim/scripts/vgm2hex.py            (run from the x8910 IP root)
 
 Output:
-    output/vgm_hex/playlist.hex  - Combined hex command file
-    output/vgm_hex/tracklist.txt - Track index (number -> name mapping)
+    sim/output/vgm_hex/playlist.hex   - combined hex command stream
+    sim/output/vgm_hex/tracklist.txt  - track index (number -> name mapping)
 
 Playlist format (32-bit hex words for $readmemh):
-    3_CC_CC_CC  = Track start marker, lower 24 bits = AY clock / 44100
+    3_CC_CC_CC  = Track start marker, lower 28 bits = AY clock / 44100,
+                  rounded down
     1_RR_00_VV  = Write register RR with value VV
     2_WW_WW_WW  = Wait WWWWWW samples (at 44100 Hz)
     0_00_00_00  = End of track
     F_00_00_00  = End of playlist
 
-Reference: VGM file format specification v1.51+
+VGM commands consumed (file format spec 1.71):
+    0xA0 aa dd  AY-3-8910 write dd to register aa & 0x7F (clock at 0x74)
+    0x61 nn nn  wait nn samples     0x62 wait 735   0x63 wait 882
+    0x70-0x7F   wait (n&0xF)+1      0x66 end of data
+Every other byte is skipped one at a time. A file plays once, to 0x66.
 """
 
 import sys
@@ -25,6 +30,12 @@ import gzip
 import struct
 import os
 import glob
+
+# Resolve I/O directories relative to this script so the CWD does not matter.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SIM_DIR    = os.path.dirname(SCRIPT_DIR)
+VGM_DIR    = os.path.join(SIM_DIR, "output", "vgm")
+HEX_DIR    = os.path.join(SIM_DIR, "output", "vgm_hex")
 
 
 def parse_vgm(data):
@@ -87,8 +98,8 @@ def parse_vgm(data):
 
 
 def main():
-    vgm_dir = "output/vgm"
-    hex_dir = "output/vgm_hex"
+    vgm_dir = VGM_DIR
+    hex_dir = HEX_DIR
     playlist_file = os.path.join(hex_dir, "playlist.hex")
     tracklist_file = os.path.join(hex_dir, "tracklist.txt")
 

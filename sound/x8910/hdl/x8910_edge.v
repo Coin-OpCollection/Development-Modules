@@ -13,29 +13,33 @@
 */
 
 //============================================================================
-//  Single-cycle rising edge detector for the AY-3-8910 implementation.
+//  Rising edge detector for the General Instrument AY-3-8910 noise and
+//  envelope generators: rise is high for one clk when sig is high and was
+//  low on the clk before. The noise shift register and the envelope step
+//  counter advance on each rising edge of their period counter outputs.
 //
-//  Generates a one-clock-cycle pulse on the rising edge of the input
-//  signal. Used by the noise and envelope generators to trigger state
-//  changes on the rising edge of their respective period counter toggles.
+//  Reference: AY-3-8910 die schematic.
 //============================================================================
 
+`timescale 1ns/1ps
+
 module x8910_edge (
+    // Clock and Reset
     input  wire clk,
-    input  wire reset,
-    input  wire signal_in,
-    output wire on_posedge
+    input  wire rst,
+
+    // Edge Interface
+    input  wire sig,
+    output wire rise
 );
 
 reg prev;
 
 always @(posedge clk) begin
-    if(reset)
-        prev <= 1'b0;
-    else
-        prev <= signal_in;
+    if(rst) prev <= 1'b0;
+    else prev <= sig;
 end
 
-assign on_posedge = (prev != signal_in) & signal_in;
+assign rise = sig & ~prev;
 
 endmodule

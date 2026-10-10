@@ -13,51 +13,60 @@
 */
 
 //============================================================================
-//  Noise generator module for the AY-3-8910 Programmable Sound Generator.
+//  Noise generator for the General Instrument AY-3-8910 programmable sound
+//  generator: a 5-bit period counter built as the tone counter, and a
+//  17-bit shift register that shifts on each rising edge of the counter
+//  output. The noise frequency is f = f_CLOCK / (16 NP) for a noise period
+//  NP [p.20].
 //
-//  Implements a pseudo-random noise source using a 17-bit Linear Feedback
-//  Shift Register (LFSR) clocked by a 5-bit period counter. The period
-//  counter uses the same count-up-toggle structure as the tone generator.
+//  Period Counter:
+//    The counter steps up on pre_cen, compares with greater-or-equal and
+//    restarts at 1, so a period of 0 acts as 1 (AY-3-8910 die schematic).
 //
-//  Reference GI Data Manual, Section 3.2:
-//    - 5-bit period counter (same count-up-toggle as tone generator)
-//    - 17-bit LFSR (Linear Feedback Shift Register)
-//    - Taps at bits 0 and 3 (confirmed by lvd RE schematic)
-//    - LFSR shifts on rising edge of period counter toggle
-//    - Zero-detect: when LFSR is all zeros, feedback forces a 1
-//    - Output: inverted lfsr[0]
-//    - Noise frequency: f_N = f_clock / (16 * NP)
+//  Shift Register:
+//    lfsr shifts toward bit 0 and takes in the XOR of bits 0 and 3, or a 1
+//    while every stage is 0, so it leaves the all-zero state that reset
+//    loads. out is the inverse of bit 0 (AY-3-8910 die schematic).
 //
-//  Reference lvd RE schematic:
-//    - LFSR initialized to 0, zero-detect prevents lock-up
-//    - Full LFSR cycle: 131071 states (2^17 - 1, maximal length)
+//  Parameters:
+//    LFSR_BITS - register length, 17
+//    LFSR_TAP0 - first feedback tap, 0 (the last stage)
+//    LFSR_TAP1 - second feedback tap, 3
+//
+//  Reference: AY-3-8910/8912 Programmable Sound Generator Data Manual,
+//             Noise Generator Control [p.20].
+//             AY-3-8910 die schematic.
 //============================================================================
+
+`timescale 1ns/1ps
 
 module x8910_noise #(
     parameter LFSR_BITS = 17,
     parameter LFSR_TAP0 = 0,
     parameter LFSR_TAP1 = 3
-) (
+)(
+    // Clock and Reset
     input  wire       clk,
-    input  wire       enable,
-    input  wire       reset,
+    input  wire       rst,
+    input  wire       pre_cen,
+
+    // Noise Interface
     input  wire [4:0] period,
     output wire       out
 );
 
-//------------------------------------------------------------------------
+//========================================================================
 // Period Counter:
-// 5-bit counter counts up at enable rate. Toggles output and resets
-// to 1 when counter reaches programmed period value.
-//------------------------------------------------------------------------
+// At or past period the counter returns to 1 and toggle changes.
+//========================================================================
 reg [4:0] counter;
 reg       toggle;
 
 always @(posedge clk) begin
-    if(reset) begin
+    if(rst) begin
         counter <= 5'd1;
         toggle <= 1'b1;
-    end else if(enable) begin
+    end else if(pre_cen) begin
         if(counter >= period) begin
             counter <= 5'd1;
             toggle <= ~toggle;
@@ -67,35 +76,31 @@ always @(posedge clk) begin
     end
 end
 
-//------------------------------------------------------------------------
-// Rising Edge Detection:
-// LFSR shifts on rising edge of period counter toggle output.
-//------------------------------------------------------------------------
-wire trigger_edge;
+wire shift;
 
 x8910_edge u_edge (
-    .clk        ( clk          ),
-    .reset      ( reset        ),
-    .signal_in  ( toggle       ),
-    .on_posedge ( trigger_edge )
+    // Clock and Reset
+    .clk  ( clk    ),
+    .rst  ( rst    ),
+
+    // Edge Interface
+    .sig  ( toggle ),
+    .rise ( shift  )
 );
 
-//------------------------------------------------------------------------
-// 17-bit LFSR:
-// Shift register with taps at bits 0 and 3. Zero-detect feedback
-// prevents lock-up when all bits are zero. Output is inverted bit 0.
-//------------------------------------------------------------------------
+//========================================================================
+// Shift Register:
+//========================================================================
 reg [LFSR_BITS-1:0] lfsr;
-wire lfsr_is_zero = (lfsr == {LFSR_BITS{1'b0}});
-wire lfsr_feedback = (lfsr[LFSR_TAP0] ^ lfsr[LFSR_TAP1]) | lfsr_is_zero;
+
+wire lfsr_zero = (lfsr == {LFSR_BITS{1'b0}});
+wire lfsr_in   = (lfsr[LFSR_TAP0] ^ lfsr[LFSR_TAP1]) | lfsr_zero;
 
 always @(posedge clk) begin
-    if(reset)
-        lfsr <= {LFSR_BITS{1'b0}};                    // Reset to 0 (per lvd RE)
-    else if(trigger_edge)
-        lfsr <= {lfsr_feedback, lfsr[LFSR_BITS-1:1]}; // Shift right, feedback in MSB
+    if(rst) lfsr <= {LFSR_BITS{1'b0}};
+    else if(shift) lfsr <= {lfsr_in, lfsr[LFSR_BITS-1:1]};
 end
 
-assign out = ~lfsr[0]; // Output is inverted lfsr[0]
+assign out = ~lfsr[0];
 
 endmodule

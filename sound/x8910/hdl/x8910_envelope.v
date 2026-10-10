@@ -13,141 +13,119 @@
 */
 
 //============================================================================
-//  Envelope generator module for the AY-3-8910 Programmable Sound Generator.
+//  Envelope generator for the General Instrument AY-3-8910 programmable
+//  sound generator: a 16-bit period counter built as the tone counter, and
+//  a 4-bit step counter that advances on each rising edge of the period
+//  counter output. One step lasts 16 EP input clocks for an envelope
+//  period EP, so a 16-step cycle is f = f_CLOCK / (256 EP) [p.24]. shape
+//  is R13, {Continue, Attack, Alternate, Hold} [p.25].
 //
-//  Implements the 16-bit period envelope with 4-bit amplitude counter and
-//  10 shape configurations controlled by R13 (Continue, Attack, Alternate,
-//  Hold). Writing R13 always restarts the envelope cycle.
+//  Step Counter:
+//    step counts 0 to 15; out is step, or 15 - step while invert is set.
+//    invert starts as the inverse of Attack and changes at the end of each
+//    cycle while Alternate is set. With Hold set the count stops after one
+//    cycle, at the cycle's last level, or at its first level with Alternate
+//    also set (AY-3-8910 die schematic).
 //
-//  Reference GI Data Manual, Section 3.5 and Datasheet Fig. 1:
-//    - 16-bit period counter (same count-up-toggle as tone)
-//    - 4-bit envelope counter (E3-E0) steps on rising edge of toggle
-//    - Shape controlled by 4 bits from R13: Continue, Attack, Alternate, Hold
-//    - Writing R13 restarts envelope (counter reset, shape reloaded)
+//  Continue = 0:
+//    Shapes 00xx act as 1001 and shapes 01xx as 1111: one cycle, then 0
+//    [p.25].
 //
-//  Implementation (per lvd RE schematic):
-//    - Counter always counts 0->15 (up)
-//    - An 'invert' flag determines output direction:
-//      invert=0: output = counter (attack/rising)
-//      invert=1: output = 15-counter (decay/falling)
-//    - 'invert' initialized to !attack on restart
-//    - 'invert' toggles on counter overflow when alternate is active
-//    - 'stop' flag prevents further counting when hold is active
+//  restart, a write to R13, and reset return both counters to the start
+//  of a cycle.
 //
-//  Continue=0 mapping (duplicated behavior, per datasheet):
-//    00xx -> 1001: decay, hold at 0
-//    01xx -> 1111: attack, hold at 0
+//  Reference: AY-3-8910/8912 Programmable Sound Generator Data Manual,
+//             Envelope Period Control [p.24], Envelope Shape/Cycle Control
+//             [p.25].
+//             AY-3-8910 die schematic.
 //============================================================================
 
+`timescale 1ns/1ps
+
 module x8910_envelope (
+    // Clock and Reset
     input  wire        clk,
-    input  wire        enable,
-    input  wire        reset,
-    input  wire        restart, // Restart envelope (R13 written)
+    input  wire        rst,
+    input  wire        pre_cen,
+
+    // Envelope Interface
+    input  wire        restart,
     input  wire [15:0] period,
-    input  wire        continue_,
-    input  wire        attack,
-    input  wire        alternate,
-    input  wire        hold,
+    input  wire [3:0]  shape,
     output wire [3:0]  out
 );
 
-wire env_reset = reset | restart;
+wire env_rst = rst | restart;
 
-//------------------------------------------------------------------------
+wire cont      = shape[3];
+wire attack    = shape[2];
+wire alternate = shape[1];
+wire hold      = shape[0];
+
+//========================================================================
 // Period Counter:
-// 16-bit counter counts up at enable rate. Toggles output and resets
-// to 1 when counter reaches programmed period value.
-//------------------------------------------------------------------------
-reg [15:0] period_counter;
-reg        period_toggle;
+// At or past period the counter returns to 1 and toggle changes.
+//========================================================================
+reg [15:0] counter;
+reg        toggle;
 
 always @(posedge clk) begin
-    if(env_reset) begin
-        period_counter <= 16'd1;
-        period_toggle <= 1'b1;
-    end else if(enable) begin
-        if(period_counter >= period) begin
-            period_counter <= 16'd1;
-            period_toggle <= ~period_toggle;
+    if(env_rst) begin
+        counter <= 16'd1;
+        toggle <= 1'b1;
+    end else if(pre_cen) begin
+        if(counter >= period) begin
+            counter <= 16'd1;
+            toggle <= ~toggle;
         end else begin
-            period_counter <= period_counter + 16'd1;
+            counter <= counter + 16'd1;
         end
     end
 end
 
-//------------------------------------------------------------------------
-// Rising Edge Detection:
-// Envelope counter steps on rising edge of period counter toggle.
-//------------------------------------------------------------------------
-wire step_edge;
+wire step_en;
 
-x8910_edge u_step_edge (
-    .clk        ( clk           ),
-    .reset      ( env_reset     ),
-    .signal_in  ( period_toggle ),
-    .on_posedge ( step_edge     )
+x8910_edge u_edge (
+    // Clock and Reset
+    .clk  ( clk     ),
+    .rst  ( env_rst ),
+
+    // Edge Interface
+    .sig  ( toggle  ),
+    .rise ( step_en )
 );
 
-//------------------------------------------------------------------------
-// Continue=0 Mapping:
-// Handle Continue=0 by mapping to equivalent Continue=1 patterns.
-// Reference Datasheet Fig. 1 and lvd RE:
-//   00xx -> 1001: Hold'=1, Alternate'=Attack=0   (\___)
-//   01xx -> 1111: Hold'=1, Alternate'=Attack=1   (/___)
-//------------------------------------------------------------------------
-wire hold_eff = hold | ~continue_;
-wire alternate_eff = continue_ ? alternate : attack;
+//========================================================================
+// Shape:
+// Continue = 0 maps to Hold = 1 with Alternate = Attack; with Hold set,
+// the sense of Alternate is inverted for the change of invert at the end
+// of the cycle.
+//========================================================================
+wire hold_eff  = hold | ~cont;
+wire alt_eff   = cont ? alternate : attack;
+wire alt_final = hold_eff ? ~alt_eff : alt_eff;
 
-// Handle Hold interaction with Alternate
-// When Hold=1 and Alternate=1: counter resets to initial then holds
-// Implementation: invert alternate sense when hold is active
-wire hold_final = hold_eff;
-wire alternate_final = hold_eff ? ~alternate_eff : alternate_eff;
-
-//------------------------------------------------------------------------
-// 4-bit Envelope Counter:
-// Counts 0->15 with stop flag for hold behavior. Steps on rising
-// edge of period counter toggle output.
-//------------------------------------------------------------------------
-reg [3:0] env_counter;
+//========================================================================
+// Step Counter:
+//========================================================================
+reg [3:0] step;
 reg       stop;
+reg       invert;
 
 always @(posedge clk) begin
-    if(env_reset) begin
-        env_counter <= 4'd0;
+    if(env_rst) begin
+        step <= 4'd0;
         stop <= 1'b0;
-    end else begin
-        if(step_edge) begin
-            if(!(hold_final & stop))
-                {stop, env_counter} <= env_counter + 5'd1;
-        end
+    end else if(step_en) begin
+        if(!(hold_eff & stop)) {stop, step} <= step + 5'd1;
     end
 end
-
-//------------------------------------------------------------------------
-// Invert Control:
-// Determines output direction (attack vs decay). Initialized to
-// !attack on restart. Toggles at counter overflow when alternate
-// is active.
-//------------------------------------------------------------------------
-reg invert;
 
 always @(posedge clk) begin
-    if(env_reset)
-        invert <= ~attack;
-    else begin
-        if(step_edge && env_counter == 4'd15) begin
-            if(alternate_final)
-                invert <= ~invert;
-        end
-    end
+    if(env_rst) invert <= ~attack;
+    else if(step_en && step == 4'd15 && alt_final) invert <= ~invert;
 end
 
-//------------------------------------------------------------------------
-// Envelope Output:
-// Counter value, optionally inverted for decay direction.
-//------------------------------------------------------------------------
-assign out = invert ? (4'd15 - env_counter) : env_counter;
+assign out = invert ? (4'd15 - step) : step;
 
 endmodule
