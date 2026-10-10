@@ -39,13 +39,14 @@ The **x8910** is a fully synchronous Verilog implementation of the General Instr
 | 5 | [Audio Output](#audio-output) | The D/A levels, `AOUT_A`-`AOUT_C` and `AOUT` |
 | 6 | [Control Interface](#control-interface) | Verilog port-level reference: `x8910` ports |
 | 7 | [Design Usage](#design-usage) | Instantiation example and bus timing rules |
-| 8 | [Implementation Notes](#implementation-notes) | Sources of the undocumented behavior and where the implementation and the GI documents differ |
-| 9 | [Project Structure](#project-structure) | Directory tree of the IP package |
-| 10 | [Design Verification](#design-verification) | Testbench section breakdown, run command, ModelSim screenshot, final summary box. Per-test log: [tb_x8910](doc/readme/tb_x8910_log.md). |
-| 11 | [VGM Playback](#vgm-playback) | VGM playback testbench and the VGM-to-WAV toolchain |
-| 12 | [Design References](#design-references) | GI documents, the die schematic and the VGM specification |
-| 13 | [License](#license) | Creative Commons Attribution-NonCommercial 4.0 International |
-| 14 | [Support](#support) | Back ongoing Coin-Op Collection FPGA core development on Patreon |
+| 8 | [Device Usage](#device-usage) | FPGA resource usage, timing and Fmax of a standalone compile on two Cyclone V parts |
+| 9 | [Implementation Notes](#implementation-notes) | Sources of the undocumented behavior and where the implementation and the GI documents differ |
+| 10 | [Project Structure](#project-structure) | Directory tree of the IP package |
+| 11 | [Design Verification](#design-verification) | Testbench section breakdown, run command, ModelSim screenshot, final summary box. Per-test log: [tb_x8910](doc/readme/tb_x8910_log.md). |
+| 12 | [VGM Playback](#vgm-playback) | VGM playback testbench and the VGM-to-WAV toolchain |
+| 13 | [Design References](#design-references) | GI documents, the die schematic and the VGM specification |
+| 14 | [License](#license) | Creative Commons Attribution-NonCommercial 4.0 International |
+| 15 | [Support](#support) | Back ongoing Coin-Op Collection FPGA core development on Patreon |
 
 ## System Architecture
 
@@ -294,6 +295,40 @@ x8910 u_psg (
 - `DOUT` is the latched register while `RDn` is low with `A0` = 0 and the chip selected, and $FF otherwise; it is combinational.
 - For an input port, drive `IOx_IN` from the pins. For an output port, the pin is low where `IOx_OUT` is 0 and `IOx_OE` is 1; `IOx_IN` reads the pin, so tie it to that level ANDed with whatever else drives the pin.
 - `AOUT_A`-`AOUT_C` and `AOUT` are unsigned with silence at 0.
+
+## Device Usage
+
+A standalone compile of `x8910` in Quartus 22.1std, its ports as virtual pins, with a 96 MHz clock. The IP needs no SDC: every path meets timing in one clock.
+
+### Cyclone V 5CSEBA6U23I7
+
+| Module | ALMs | ALUTs | Registers | Block Memory Bits | M10K | DSP |
+|--------|------|-------|-----------|-------------------|------|-----|
+| `x8910` | 255.0 (0.6%) | 321 | 266 | 0 | 0 | 0 |
+| `x8910_envelope` | 27.2 | 49 | 24 | 0 | 0 | 0 |
+| `x8910_tone` (A) | 15.2 | 30 | 13 | 0 | 0 | 0 |
+| `x8910_tone` (B) | 14.9 | 29 | 13 | 0 | 0 | 0 |
+| `x8910_tone` (C) | 15.2 | 29 | 13 | 0 | 0 | 0 |
+| `x8910_noise` | 10.2 | 19 | 24 | 0 | 0 | 0 |
+| `x8910_edge` (envelope) | 0.5 | 1 | 1 | 0 | 0 | 0 |
+| `x8910_edge` (noise) | 0.3 | 1 | 1 | 0 | 0 | 0 |
+
+Fmax 144.55 MHz. At 96 MHz: setup slack +3.498 ns, hold slack +0.164 ns.
+
+### Cyclone V 5CEBA4F23C8
+
+| Module | ALMs | ALUTs | Registers | Block Memory Bits | M10K | DSP |
+|--------|------|-------|-----------|-------------------|------|-----|
+| `x8910` | 256.5 (1.4%) | 321 | 266 | 0 | 0 | 0 |
+| `x8910_envelope` | 26.8 | 49 | 24 | 0 | 0 | 0 |
+| `x8910_tone` (A) | 15.2 | 30 | 13 | 0 | 0 | 0 |
+| `x8910_tone` (B) | 15.2 | 29 | 13 | 0 | 0 | 0 |
+| `x8910_tone` (C) | 14.8 | 29 | 13 | 0 | 0 | 0 |
+| `x8910_noise` | 12.3 | 19 | 24 | 0 | 0 | 0 |
+| `x8910_edge` (envelope) | 0.3 | 1 | 1 | 0 | 0 | 0 |
+| `x8910_edge` (noise) | 0.7 | 1 | 1 | 0 | 0 | 0 |
+
+Fmax 139.00 MHz. At 96 MHz: setup slack +3.222 ns, hold slack +0.167 ns.
 
 ## Implementation Notes
 
