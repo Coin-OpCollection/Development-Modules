@@ -18,6 +18,10 @@
 //  low on the clk before. The noise shift register and the envelope step
 //  counter advance on each rising edge of their period counter outputs.
 //
+//  Reset sets prev to 1, as the period counter outputs, so reset and an
+//  envelope restart make no edge: the first noise shift and the first
+//  envelope step come a full period later (AY-3-8910 die schematic).
+//
 //  Reference: AY-3-8910 die schematic.
 //============================================================================
 
@@ -36,7 +40,7 @@ module x8910_edge (
 reg prev;
 
 always @(posedge clk) begin
-    if(rst) prev <= 1'b0;
+    if(rst) prev <= 1'b1;
     else prev <= sig;
 end
 

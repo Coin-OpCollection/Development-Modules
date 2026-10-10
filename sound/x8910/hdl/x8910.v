@@ -30,31 +30,47 @@
 //      and BC1 bus control decode [p.15-17]
 //    - WRn: write, active low; each CLK it is low writes DIN to the
 //      address latch (A0 = 0) or to the latched register (A0 = 1)
-//    - RDn: read, active low; not used, DOUT is driven at all times
+//    - RDn: read, active low; with A0 = 0 DOUT is the latched register,
+//      otherwise $FF
 //    - DIN, DOUT: DA0-DA7 split into input and output
+//    - IOA_IN, IOB_IN: the I/O port pin levels; IOA_OUT, IOB_OUT: R14 and
+//      R15; IOA_OE, IOB_OE: R7 bits 6 and 7, output mode [p.10], [p.28]
 //    - RESETn: RESET, active low [p.13]
-//    - AOUT: the three channels summed, 8 bits unsigned
+//    - AOUT_A, AOUT_B, AOUT_C: the three D/A outputs, 10 bits each [p.34]
+//    - AOUT: their sum, 12 bits unsigned
+//
+//  Chip Select:
+//    An address write loads the address latch only when DIN[7:4] is 0000,
+//    the chip's address; any other value deselects the chip and keeps the
+//    address. A deselected chip ignores data writes and reads $FF; reset
+//    deselects it (AY-3-8910 die schematic). A8 and /A9 are not modeled:
+//    the board's decode drives WRn and RDn.
 //
 //  Registers:
 //    R0-R5 tone periods, R6 noise period, R7 mixer and I/O enable, R8-R10
 //    amplitudes, R11-R12 envelope period, R13 envelope shape, R14-R15 I/O
 //    port data (Figure 2 [p.8]). Registers are numbered in decimal here;
 //    GI numbers them in octal (R0-R17). RESETn clears every register
-//    except R7, which is set to $FF, every tone and noise off. A write to
-//    R13 restarts the envelope [p.25]. R14 and R15 store and read back;
-//    the I/O ports are not modeled.
+//    [p.13]. A write to R13 restarts the envelope [p.25].
+//
+//  I/O Ports:
+//    A port reads its pins, IOx_IN, in either mode. In output mode
+//    (IOx_OE = 1) a pin is pulled low where its IOx_OUT bit is 0 and is
+//    released where it is 1; the board pulls it up (AY-3-8910 die
+//    schematic). In input mode every pin is released.
 //
 //  Audio Output:
 //    Each channel is its D/A level while the mixer output is high and 0
-//    while it is low. AOUT is bits 11-4 of the sum of the three levels,
-//    registered; one channel at level 15 gives 63.
+//    while it is low. AOUT_A, AOUT_B and AOUT_C are the three levels and
+//    AOUT is their sum, all registered.
 //
 //  Reference: AY-3-8910/8912 Programmable Sound Generator Data Manual,
 //             Basic Functional Blocks [p.7-11], Pin Functions [p.13], Bus
 //             Timing [p.15], State Timing [p.16-17], Tone Generator
 //             Control [p.18], Noise Generator Control [p.20], Mixer
 //             Control [p.21], Amplitude Control [p.22], Envelope Generator
-//             Control [p.24-25], D/A Converter Operation [p.29].
+//             Control [p.24-25], I/O Port Data Store [p.28], D/A
+//             Converter Operation [p.29], Audio Output Interface [p.34].
 //             AY-3-8910 die schematic.
 //============================================================================
 
@@ -62,19 +78,30 @@
 
 module x8910 (
     // Clock and Reset
-    input  wire       CLK,
-    input  wire       RESETn,
-    input  wire       CEN,
+    input  wire        CLK,
+    input  wire        RESETn,
+    input  wire        CEN,
 
     // Control Interface
-    input  wire [7:0] DIN,
-    output reg  [7:0] DOUT,
-    input  wire       RDn,
-    input  wire       WRn,
-    input  wire       A0,
+    input  wire  [7:0] DIN,
+    output reg   [7:0] DOUT,
+    input  wire        RDn,
+    input  wire        WRn,
+    input  wire        A0,
+
+    // I/O Ports
+    input  wire  [7:0] IOA_IN,
+    output wire  [7:0] IOA_OUT,
+    output wire        IOA_OE,
+    input  wire  [7:0] IOB_IN,
+    output wire  [7:0] IOB_OUT,
+    output wire        IOB_OE,
 
     // Audio Output
-    output reg  [7:0] AOUT
+    output reg   [9:0] AOUT_A,
+    output reg   [9:0] AOUT_B,
+    output reg   [9:0] AOUT_C,
+    output reg  [11:0] AOUT
 );
 
 wire rst = ~RESETn;
@@ -123,39 +150,34 @@ end
 
 //========================================================================
 // Registers:
-// A write with A0 = 0 loads the address latch from DIN[3:0]; a write with
-// A0 = 1 loads the latched register [p.15-17].
+// A write with A0 = 0 loads the address latch from DIN[3:0] and selects
+// the chip when DIN[7:4] is 0000, or deselects it; a write with A0 = 1
+// loads the latched register of a selected chip [p.15-17].
 //========================================================================
 reg [3:0] latch_reg;
 reg [7:0] regfile [0:15];
+reg       selected;
 reg       restart_env;
+
+integer r;
 
 always @(posedge CLK) begin
     if(rst) begin
         latch_reg <= 4'd0;
-        regfile[0] <= 8'h00;
-        regfile[1] <= 8'h00;
-        regfile[2] <= 8'h00;
-        regfile[3] <= 8'h00;
-        regfile[4] <= 8'h00;
-        regfile[5] <= 8'h00;
-        regfile[6] <= 8'h00;
-        regfile[7] <= 8'hFF;
-        regfile[8] <= 8'h00;
-        regfile[9] <= 8'h00;
-        regfile[10] <= 8'h00;
-        regfile[11] <= 8'h00;
-        regfile[12] <= 8'h00;
-        regfile[13] <= 8'h00;
-        regfile[14] <= 8'h00;
-        regfile[15] <= 8'h00;
+        for(r = 0; r < 16; r = r + 1) regfile[r] <= 8'h00;
+        selected <= 1'b0;
         restart_env <= 1'b0;
     end else begin
         restart_env <= 1'b0;
         if(wr) begin
             if(!A0) begin
-                latch_reg <= DIN[3:0];
-            end else begin
+                if(DIN[7:4] == 4'd0) begin
+                    latch_reg <= DIN[3:0];
+                    selected <= 1'b1;
+                end else begin
+                    selected <= 1'b0;
+                end
+            end else if(selected) begin
                 regfile[latch_reg] <= DIN;
                 if(latch_reg == 4'd13) restart_env <= 1'b1;
             end
@@ -165,22 +187,34 @@ end
 
 //========================================================================
 // Register Read:
-// A0 = 0 reads the latched register with its unused bits as 0 (Figure 2
-// [p.8]); A0 = 1 reads the address latch.
+// RDn low with A0 = 0 reads the latched register of a selected chip, its
+// unused bits as 0 (Figure 2 [p.8]) and R14, R15 as the port pins;
+// otherwise DOUT is $FF.
 //========================================================================
 always @(*) begin
-    if(!A0) begin
+    if(!RDn && !A0 && selected) begin
         case(latch_reg)
             4'd1, 4'd3, 4'd5 : DOUT = {4'd0, regfile[latch_reg][3:0]};
             4'd6 : DOUT = {3'd0, regfile[6][4:0]};
             4'd8, 4'd9, 4'd10 : DOUT = {3'd0, regfile[latch_reg][4:0]};
             4'd13 : DOUT = {4'd0, regfile[13][3:0]};
+            4'd14 : DOUT = IOA_IN;
+            4'd15 : DOUT = IOB_IN;
             default : DOUT = regfile[latch_reg];
         endcase
     end else begin
-        DOUT = {4'd0, latch_reg};
+        DOUT = 8'hFF;
     end
 end
+
+//========================================================================
+// I/O Ports:
+// R7 bit 6 sets port A to output mode, bit 7 port B [p.28].
+//========================================================================
+assign IOA_OUT = regfile[14];
+assign IOA_OE  = regfile[7][6];
+assign IOB_OUT = regfile[15];
+assign IOB_OE  = regfile[7][7];
 
 //========================================================================
 // Register Fields:
@@ -302,17 +336,24 @@ wire [3:0] level_c = regfile[10][4] ? envelope : regfile[10][3:0];
 //========================================================================
 // Audio Output:
 // Each channel is its D/A level while its mixer output is high; AOUT is
-// bits 11-4 of the sum of the three, registered.
+// the sum of the three, registered with them [p.34].
 //========================================================================
 wire [9:0] vol_a = mix_a ? dac_vol(level_a) : 10'd0;
 wire [9:0] vol_b = mix_b ? dac_vol(level_b) : 10'd0;
 wire [9:0] vol_c = mix_c ? dac_vol(level_c) : 10'd0;
 
-wire [11:0] master_sum = vol_a + vol_b + vol_c;
-
 always @(posedge CLK) begin
-    if(rst) AOUT <= 8'd0;
-    else AOUT <= master_sum[11:4];
+    if(rst) begin
+        AOUT_A <= 10'd0;
+        AOUT_B <= 10'd0;
+        AOUT_C <= 10'd0;
+        AOUT <= 12'd0;
+    end else begin
+        AOUT_A <= vol_a;
+        AOUT_B <= vol_b;
+        AOUT_C <= vol_c;
+        AOUT <= vol_a + vol_b + vol_c;
+    end
 end
 
 endmodule

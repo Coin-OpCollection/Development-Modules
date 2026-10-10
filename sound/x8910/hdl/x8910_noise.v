@@ -21,7 +21,8 @@
 //
 //  Period Counter:
 //    The counter steps up on pre_cen, compares with greater-or-equal and
-//    restarts at 1, so a period of 0 acts as 1 (AY-3-8910 die schematic).
+//    restarts at 1, so a period of 0 acts as 1, the fastest (AY-3-8910 die
+//    schematic). Figure 29 [p.54] calls R6 = 0 the maximum noise period.
 //
 //  Shift Register:
 //    lfsr shifts toward bit 0 and takes in the XOR of bits 0 and 3, or a 1

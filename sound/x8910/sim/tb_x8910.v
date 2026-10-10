@@ -17,30 +17,41 @@
 //  programmable sound generator implementation.
 //
 //  Verifies the registers through the chip bus: writes, reads with the
-//  unused bits masked, and the reset values of R0 and R7; the three tone
-//  generators, the rate set by the period and period 0; the noise shift
-//  register and the rate set by the noise period; the mixer with tone,
-//  noise, both and neither; the D/A levels on AOUT; the envelope shapes,
-//  hold and restart; each channel and the sum on AOUT; and register writes
-//  while a channel plays.
+//  unused bits masked, the reset value of every register, chip select and
+//  the I/O ports; the three tone generators, the rate set by the period,
+//  period 0 and the exact half periods; the noise shift register, the rate
+//  set by the noise period, the first shift after reset and the 131071-shift
+//  sequence; the mixer with tone, noise, both and neither; the D/A levels on
+//  AOUT and on each channel output; the envelope shapes, hold, restart and
+//  the first step after an R13 write; each channel and the sum on AOUT; and
+//  register writes while a channel plays.
 //
 //  DUT:
 //    uut - x8910, the full chip on the bus
 //  CLK has a 10 ns period. CEN is driven only by the bench: one pulse is
-//  two CLK, CEN high on the second.
+//  two CLK, CEN high on the second. cen_total counts the CEN pulses; the
+//  monitors time the tone A toggles, the noise shifts and the envelope
+//  steps in CEN pulses.
 //
 //  Test Organization:
-//    REG Section A:   Writes and reads of R0 and R7, the read masks of R1,
-//                     R3, R5, R6, R8-R10 and R13, the reset values of R0
-//                     and R7
+//    REG Section A:   Writes and reads of R0 and R7, the read masks, the
+//                     reset value of every register, a deselected chip,
+//                     chip select by DIN[7:4], the I/O ports
 //    TONE Section B:  Each tone generator toggling, period 1 faster than
-//                     period 4, period 0
+//                     period 4, period 0, the half periods of TP = 1, 5,
+//                     0 and 4095
 //    NOISE Section C: The shift register running, the noise output
-//                     changing, noise period 1 faster than 16
+//                     changing, noise period 1 faster than 16, no shift in
+//                     the first period after reset, the shift intervals of
+//                     NP = 1 and 5, the 131071-shift sequence
 //    MIX Section D:   Tone and noise off, tone only, noise only, both, and
 //                     amplitude 0
-//    AMP Section E:   Level 15 on each channel, all off, levels 11, 7 and 1
-//    ENV Section F:   Shapes $00, $04 and $08-$0F, restart, a slow period
+//    AMP Section E:   Level 15 on each channel, all off, levels 11, 7 and
+//                     1 on AOUT; every level on AOUT_A, and AOUT_B, AOUT_C
+//                     and their sum
+//    ENV Section F:   Shapes $00, $04 and $08-$0F, restart, a slow period,
+//                     the first step and the step interval after an R13
+//                     write
 //    OUT Section G:   Three channels at level 15, all off, each channel
 //                     alone, A and B
 //    WRITE Section H: Amplitude, period and envelope mode writes while a
@@ -52,7 +63,9 @@
 //    vsim -quiet -c tb_x8910 -do "run -all; quit -f"
 //
 //  Reference: AY-3-8910/8912 Programmable Sound Generator Data Manual,
-//             Basic Functional Blocks [p.7-11], Operation [p.18-29].
+//             Basic Functional Blocks [p.7-11], Pin Functions [p.13],
+//             Operation [p.18-29].
+//             AY-3-8910 die schematic.
 //============================================================================
 
 `timescale 1ns/1ps
@@ -63,15 +76,24 @@ module tb_x8910;
 // Test Signals:
 // Clock, the clock enable and the chip pins.
 //=========================================================================
-reg        CLK;
-reg        RESETn;
-reg        CEN;
-reg  [7:0] DIN;
-wire [7:0] DOUT;
-reg        RDn;
-reg        WRn;
-reg        A0;
-wire [7:0] AOUT;
+reg         CLK;
+reg         RESETn;
+reg         CEN;
+reg  [7:0]  DIN;
+wire [7:0]  DOUT;
+reg         RDn;
+reg         WRn;
+reg         A0;
+reg  [7:0]  IOA_IN;
+wire [7:0]  IOA_OUT;
+wire        IOA_OE;
+reg  [7:0]  IOB_IN;
+wire [7:0]  IOB_OUT;
+wire        IOB_OE;
+wire [9:0]  AOUT_A;
+wire [9:0]  AOUT_B;
+wire [9:0]  AOUT_C;
+wire [11:0] AOUT;
 
 //=========================================================================
 // Test Infrastructure:
@@ -80,26 +102,94 @@ integer total_tests;
 integer passed_tests;
 integer failed_tests;
 integer i;
+reg [8*160-1:0] tname;
 
 //=========================================================================
 // DUT:
 //=========================================================================
 x8910 uut (
     // Clock and Reset
-    .CLK    ( CLK    ),
-    .RESETn ( RESETn ),
-    .CEN    ( CEN    ),
+    .CLK     ( CLK     ),
+    .RESETn  ( RESETn  ),
+    .CEN     ( CEN     ),
 
     // Control Interface
-    .DIN    ( DIN    ),
-    .DOUT   ( DOUT   ),
-    .RDn    ( RDn    ),
-    .WRn    ( WRn    ),
-    .A0     ( A0     ),
+    .DIN     ( DIN     ),
+    .DOUT    ( DOUT    ),
+    .RDn     ( RDn     ),
+    .WRn     ( WRn     ),
+    .A0      ( A0      ),
+
+    // I/O Ports
+    .IOA_IN  ( IOA_IN  ),
+    .IOA_OUT ( IOA_OUT ),
+    .IOA_OE  ( IOA_OE  ),
+    .IOB_IN  ( IOB_IN  ),
+    .IOB_OUT ( IOB_OUT ),
+    .IOB_OE  ( IOB_OE  ),
 
     // Audio Output
-    .AOUT   ( AOUT   )
+    .AOUT_A  ( AOUT_A  ),
+    .AOUT_B  ( AOUT_B  ),
+    .AOUT_C  ( AOUT_C  ),
+    .AOUT    ( AOUT    )
 );
+
+//=========================================================================
+// Monitors:
+// cen_total counts CEN pulses. ta_gap is the CEN pulses between the last
+// two toggles of tone A; ns_gap between the last two noise shifts, ns_n
+// the shifts since the last reset; env_last is the CEN count of the last
+// envelope step.
+//=========================================================================
+integer cen_total;
+integer ta_last;
+integer ta_gap;
+integer ns_last;
+integer ns_gap;
+integer ns_n;
+integer env_last;
+reg     ta_prev;
+reg     [16:0] lfsr_prev;
+reg     [3:0] env_prev;
+
+initial begin
+    cen_total = 0;
+    ta_last = 0;
+    ta_gap = 0;
+    ns_last = 0;
+    ns_gap = 0;
+    ns_n = 0;
+    env_last = 0;
+    ta_prev = 1'b1;
+    lfsr_prev = 17'd0;
+    env_prev = 4'd0;
+end
+
+always @(posedge CLK) if(CEN) cen_total = cen_total + 1;
+
+always @(negedge CLK) begin
+    if(!RESETn) begin
+        ns_n = 0;
+        lfsr_prev = 17'd0;
+    end else begin
+        if(uut.tone_a !== ta_prev) begin
+            ta_gap = cen_total - ta_last;
+            ta_last = cen_total;
+            ta_prev = uut.tone_a;
+        end
+        if(uut.u_noise.lfsr !== lfsr_prev) begin
+            ns_gap = cen_total - ns_last;
+            ns_last = cen_total;
+            ns_n = ns_n + 1;
+            lfsr_prev = uut.u_noise.lfsr;
+        end
+        if(uut.envelope !== env_prev) begin
+            env_last = cen_total;
+            env_prev = uut.envelope;
+        end
+    end
+end
 
 //=========================================================================
 // Clock Generation:
@@ -198,6 +288,40 @@ task read_reg;
 endtask
 
 //-------------------------------------------------------------------------
+// Bus Cycles:
+// One-CLK address write, data write and read, for chip select.
+//-------------------------------------------------------------------------
+task bus_write;
+    input       a0_val;
+    input [7:0] data;
+    begin
+        @(posedge CLK);
+        #1;
+        A0 = a0_val;
+        DIN = data;
+        WRn = 1'b0;
+        @(posedge CLK);
+        #1;
+        WRn = 1'b1;
+        A0 = 1'b0;
+    end
+endtask
+
+task bus_read;
+    output [7:0] data;
+    begin
+        @(posedge CLK);
+        #1;
+        A0 = 1'b0;
+        RDn = 1'b0;
+        @(posedge CLK);
+        #1;
+        data = DOUT;
+        RDn = 1'b1;
+    end
+endtask
+
+//-------------------------------------------------------------------------
 // System Reset:
 //-------------------------------------------------------------------------
 task reset_system;
@@ -208,6 +332,8 @@ task reset_system;
         WRn = 1'b1;
         RDn = 1'b1;
         DIN = 8'h00;
+        IOA_IN = 8'hFF;
+        IOB_IN = 8'hFF;
         #100;
         RESETn = 1'b1;
         #50;
@@ -283,6 +409,8 @@ initial begin
         read_reg(4'd0, rdata);
         check(rdata, 8'hAB, "A.1 R0 write/read = $AB");
     end
+    #1;
+    check(DOUT, 8'hFF, "A.1 DOUT $FF while RDn is high");
 
     // Write and read R1 (only [3:0] valid, upper bits masked)
     write_reg(4'd1, 8'hFF);
@@ -356,12 +484,12 @@ initial begin
         check(rdata, 8'h0F, "A.1 R13 read mask [3:0]");
     end
 
-    // R7 default after reset (all disabled = $FF)
+    // R7 after reset: cleared like every register
     reset_system();
     begin : read_r7_rst
         reg [7:0] rdata;
         read_reg(4'd7, rdata);
-        check(rdata, 8'hFF, "A.1 R7 reset default = $FF");
+        check(rdata, 8'h00, "A.1 R7 reset default = $00");
     end
 
     // R0 default after reset (should be 0)
@@ -369,6 +497,72 @@ initial begin
         reg [7:0] rdata;
         read_reg(4'd0, rdata);
         check(rdata, 8'h00, "A.1 R0 reset default = $00");
+    end
+
+    //=====================================================================
+    // REG SECTION A.2: Reset Values
+    // RESET clears every register [p.13]; R14 and R15 read the port pins.
+    // Out of reset the chip is deselected and reads $FF until an address
+    // write.
+    //=====================================================================
+    $display("\n=== REG SECTION A.2: Reset Values ===\n");
+
+    reset_system();
+    begin : rst_values
+        reg [7:0] rdata;
+        bus_read(rdata);
+        check(rdata, 8'hFF, "A.2 deselected after reset, reads $FF");
+        for(i = 0; i < 16; i = i + 1) begin
+            read_reg(i, rdata);
+            $sformat(tname, "A.2 R%0d reset value", i);
+            check(rdata, (i >= 14) ? 8'hFF : 8'h00, tname);
+        end
+    end
+
+    //=====================================================================
+    // REG SECTION A.3: Chip Select
+    // An address write with DIN[7:4] other than 0000 deselects the chip
+    // and keeps the address; a deselected chip ignores data writes and
+    // reads $FF. A valid address write selects it again.
+    //=====================================================================
+    $display("\n=== REG SECTION A.3: Chip Select ===\n");
+
+    reset_system();
+    write_reg(4'd0, 8'h55);
+    begin : chip_select
+        reg [7:0] rdata;
+        bus_write(1'b0, 8'h10);
+        bus_write(1'b1, 8'hAA);
+        bus_read(rdata);
+        check(rdata, 8'hFF, "A.3 deselected chip reads $FF");
+        check(uut.latch_reg, 4'd0, "A.3 address kept on DIN[7:4] = 0001");
+        read_reg(4'd0, rdata);
+        check(rdata, 8'h55, "A.3 data write ignored while deselected");
+    end
+
+    //=====================================================================
+    // REG SECTION A.4: I/O Ports
+    // R7 bits 6 and 7 set output mode; IOA_OUT and IOB_OUT are R14 and
+    // R15; a port read returns the pins [p.28].
+    //=====================================================================
+    $display("\n=== REG SECTION A.4: I/O Ports ===\n");
+
+    reset_system();
+    IOA_IN = 8'h5A;
+    IOB_IN = 8'hC3;
+    write_reg(4'd7, 8'h40);
+    write_reg(4'd14, 8'h12);
+    write_reg(4'd15, 8'h34);
+    check(IOA_OE, 1'b1, "A.4 R7 bit 6 sets port A output mode");
+    check(IOB_OE, 1'b0, "A.4 port B input mode");
+    check(IOA_OUT, 8'h12, "A.4 IOA_OUT is R14");
+    check(IOB_OUT, 8'h34, "A.4 IOB_OUT is R15");
+    begin : port_read
+        reg [7:0] rdata;
+        read_reg(4'd14, rdata);
+        check(rdata, 8'h5A, "A.4 R14 reads the port A pins");
+        read_reg(4'd15, rdata);
+        check(rdata, 8'hC3, "A.4 R15 reads the port B pins");
     end
 
     //=====================================================================
@@ -502,6 +696,29 @@ initial begin
     end
 
     //=====================================================================
+    // TONE SECTION B.2: Half Periods
+    // A tone toggles every TP steps of the input clock / 8, so a half
+    // period is 8 TP CEN pulses; TP = 0 acts as 1 [p.18].
+    //=====================================================================
+    $display("\n=== TONE SECTION B.2: Half Periods ===\n");
+
+    begin : half_periods
+        integer tp;
+        integer want;
+        for(i = 0; i < 4; i = i + 1) begin
+            tp = (i == 0) ? 1 : (i == 1) ? 5 : (i == 2) ? 0 : 4095;
+            want = (tp == 0) ? 8 : 8 * tp;
+            reset_system();
+            write_reg(4'd7, 8'h3E);
+            write_reg(4'd0, tp & 8'hFF);
+            write_reg(4'd1, tp >> 8);
+            run_cycles(3 * want + 16);
+            $sformat(tname, "B.2 TP = %0d half period %0d CEN pulses", tp, want);
+            check(ta_gap, want, tname);
+        end
+    end
+
+    //=====================================================================
     // NOISE SECTION C.1: Noise Generator
     // Verify LFSR activity and period control.
     //=====================================================================
@@ -571,6 +788,34 @@ initial begin
         end
 
         check(changes_fast > changes_slow, 1, "C.1 Noise: period 1 faster than 16");
+    end
+
+    //=====================================================================
+    // NOISE SECTION C.2: Shift Timing and Sequence
+    // The register shifts on each rising edge of the period counter: every
+    // 16 NP CEN pulses, none in the first period after reset. From reset
+    // the zero detect loads a 1, and the sequence repeats every 131071
+    // shifts.
+    //=====================================================================
+    $display("\n=== NOISE SECTION C.2: Shift Timing and Sequence ===\n");
+
+    reset_system();
+    run_cycles(7);
+    check(uut.u_noise.lfsr, 17'd0, "C.2 no shift in the first period after reset");
+    run_cycles(48);
+    check(ns_gap, 16, "C.2 NP = 0 shift interval 16 CEN pulses");
+    write_reg(4'd6, 8'h05);
+    run_cycles(200);
+    check(ns_gap, 80, "C.2 NP = 5 shift interval 80 CEN pulses");
+    reset_system();
+    write_reg(4'd6, 8'h01);
+    begin : lfsr_period
+        reg [16:0] first;
+        while(ns_n < 1) cycle();
+        first = uut.u_noise.lfsr;
+        while(ns_n < 131072) cycle();
+        check(uut.u_noise.lfsr, first, "C.2 sequence repeats after 131071 shifts");
+        check(first, 17'h10000, "C.2 first shift loads a 1 into the top stage");
     end
 
     //=====================================================================
@@ -658,19 +903,19 @@ initial begin
     write_reg(4'd9, 8'h00);
     write_reg(4'd10, 8'h00);
     run_cycles(16);
-    check(AOUT, 8'd63, "E.1 DAC: A=15 -> 63");
+    check(AOUT, 12'd1023, "E.1 DAC: A=15 -> 1023");
 
     // Channel A off, B level 15
     write_reg(4'd8, 8'h00);
     write_reg(4'd9, 8'h0F);
     run_cycles(16);
-    check(AOUT, 8'd63, "E.1 DAC: B=15 -> 63");
+    check(AOUT, 12'd1023, "E.1 DAC: B=15 -> 1023");
 
     // Channel B off, C level 15
     write_reg(4'd9, 8'h00);
     write_reg(4'd10, 8'h0F);
     run_cycles(16);
-    check(AOUT, 8'd63, "E.1 DAC: C=15 -> 63");
+    check(AOUT, 12'd1023, "E.1 DAC: C=15 -> 1023");
 
     // All channels off
     write_reg(4'd10, 8'h00);
@@ -680,17 +925,46 @@ initial begin
     // Level 11 (256 -> 16)
     write_reg(4'd8, 8'h0B);
     run_cycles(16);
-    check(AOUT, 8'd16, "E.1 DAC: level 11 -> 16");
+    check(AOUT, 12'd256, "E.1 DAC: level 11 -> 256");
 
     // Level 7 (64 -> 4)
     write_reg(4'd8, 8'h07);
     run_cycles(16);
-    check(AOUT, 8'd4, "E.1 DAC: level 7 -> 4");
+    check(AOUT, 12'd64, "E.1 DAC: level 7 -> 64");
 
     // Level 1 (8 -> 0, below rounding threshold)
     write_reg(4'd8, 8'h01);
     run_cycles(16);
-    check(AOUT, 8'd0, "E.1 DAC: level 1 -> 0");
+    check(AOUT, 12'd8, "E.1 DAC: level 1 -> 8");
+
+    //=====================================================================
+    // AMP SECTION E.2: Channel Outputs
+    // AOUT_A, AOUT_B and AOUT_C are the three D/A levels, ideal 3 dB
+    // steps; AOUT is their sum [p.29], [p.34].
+    //=====================================================================
+    $display("\n=== AMP SECTION E.2: Channel Outputs ===\n");
+
+    reset_system();
+    write_reg(4'd7, 8'h3F);
+    begin : chan_levels
+        reg [9:0] lvl [0:15];
+        lvl[0] = 0; lvl[1] = 8; lvl[2] = 11; lvl[3] = 16;
+        lvl[4] = 23; lvl[5] = 32; lvl[6] = 45; lvl[7] = 64;
+        lvl[8] = 91; lvl[9] = 128; lvl[10] = 181; lvl[11] = 256;
+        lvl[12] = 362; lvl[13] = 512; lvl[14] = 723; lvl[15] = 1023;
+        for(i = 0; i < 16; i = i + 1) begin
+            write_reg(4'd8, i);
+            run_cycles(2);
+            $sformat(tname, "E.2 AOUT_A level %0d = %0d", i, lvl[i]);
+            check(AOUT_A, lvl[i], tname);
+        end
+    end
+    write_reg(4'd9, 8'h0F);
+    write_reg(4'd10, 8'h07);
+    run_cycles(2);
+    check(AOUT_B, 10'd1023, "E.2 AOUT_B level 15");
+    check(AOUT_C, 10'd64, "E.2 AOUT_C level 7");
+    check(AOUT, AOUT_A + AOUT_B + AOUT_C, "E.2 AOUT is the sum of the three");
 
     //=====================================================================
     // ENV SECTION F.1: Envelope Generator
@@ -771,7 +1045,12 @@ initial begin
     run_cycles(16);
     check(uut.u_envelope.invert, 1'b0, "F.1 Shape $0C: attack (invert=0)");
     run_cycles(512);
-    check(uut.u_envelope.stop, 1'b0, "F.1 Shape $0C: not stopped (repeat)");
+    begin : shape_0c_repeat
+        reg [3:0] before;
+        before = uut.u_envelope.out;
+        run_cycles(32);
+        check(uut.u_envelope.out != before, 1, "F.1 Shape $0C: still counting (repeat)");
+    end
 
     // Shape $0D: Continue=1, Attack=1, Alt=0, Hold=1 -> attack, hold at max (/---)
     write_reg(4'd13, 8'h0D);
@@ -825,6 +1104,32 @@ initial begin
     end
 
     //=====================================================================
+    // ENV SECTION F.2: First Step
+    // One step is 16 EP CEN pulses. After an R13 write the first step
+    // comes a full step later, up to 7 pulses early for the prescaler
+    // phase, and each step after it 16 EP pulses on.
+    //=====================================================================
+    $display("\n=== ENV SECTION F.2: First Step ===\n");
+
+    reset_system();
+    write_reg(4'd11, 8'h04);
+    write_reg(4'd12, 8'h00);
+    begin : first_step
+        integer t0;
+        integer first;
+        write_reg(4'd13, 8'h0C);
+        @(posedge CLK);
+        #1;
+        t0 = cen_total;
+        while(uut.envelope == 4'd0) cycle();
+        first = env_last - t0;
+        check(first >= 57 && first <= 64, 1, "F.2 first step 57-64 CEN pulses after the R13 write");
+        t0 = env_last;
+        while(env_last == t0) cycle();
+        check(env_last - t0, 64, "F.2 step interval 64 CEN pulses (EP = 4)");
+    end
+
+    //=====================================================================
     // OUT SECTION G.1: Audio Output
     // Verify channel summing, isolation, and output range.
     //=====================================================================
@@ -838,7 +1143,7 @@ initial begin
     write_reg(4'd9, 8'h0F);
     write_reg(4'd10, 8'h0F);
     run_cycles(16);
-    check(AOUT, 8'd191, "G.1 3ch max -> 191");
+    check(AOUT, 12'd3069, "G.1 3ch max -> 3069");
 
     // All channels off = 0
     write_reg(4'd8, 8'h00);
@@ -853,9 +1158,9 @@ initial begin
     write_reg(4'd10, 8'h00);
     run_cycles(16);
     begin : iso_a
-        reg [7:0] a_only;
+        reg [11:0] a_only;
         a_only = AOUT;
-        check(a_only, 8'd63, "G.1 A only -> 63");
+        check(a_only, 12'd1023, "G.1 A only -> 1023");
     end
 
     // Channel isolation: only B contributes
@@ -863,14 +1168,14 @@ initial begin
     write_reg(4'd9, 8'h0F);
     write_reg(4'd10, 8'h00);
     run_cycles(16);
-    check(AOUT, 8'd63, "G.1 B only -> 63");
+    check(AOUT, 12'd1023, "G.1 B only -> 1023");
 
     // Channel isolation: only C contributes
     write_reg(4'd8, 8'h00);
     write_reg(4'd9, 8'h00);
     write_reg(4'd10, 8'h0F);
     run_cycles(16);
-    check(AOUT, 8'd63, "G.1 C only -> 63");
+    check(AOUT, 12'd1023, "G.1 C only -> 1023");
 
     // Two channels summed
     write_reg(4'd8, 8'h0F);
@@ -878,7 +1183,7 @@ initial begin
     write_reg(4'd10, 8'h00);
     run_cycles(16);
     // Expected: 2 * 1023 = 2046, 2046 >> 4 = 127
-    check(AOUT, 8'd127, "G.1 A+B -> 127");
+    check(AOUT, 12'd2046, "G.1 A+B -> 2046");
 
     //=====================================================================
     // WRITE SECTION H.1: Writes While Active

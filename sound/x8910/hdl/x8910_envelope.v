@@ -51,8 +51,8 @@ module x8910_envelope (
     // Envelope Interface
     input  wire        restart,
     input  wire [15:0] period,
-    input  wire [3:0]  shape,
-    output wire [3:0]  out
+    input  wire  [3:0] shape,
+    output wire  [3:0] out
 );
 
 wire env_rst = rst | restart;

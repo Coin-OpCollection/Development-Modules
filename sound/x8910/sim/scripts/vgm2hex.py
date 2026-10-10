@@ -11,18 +11,27 @@ Output:
     sim/output/vgm_hex/tracklist.txt  - track index (number -> name mapping)
 
 Playlist format (32-bit hex words for $readmemh):
-    3_CC_CC_CC  = Track start marker, lower 28 bits = AY clock / 44100,
-                  rounded down
-    1_RR_00_VV  = Write register RR with value VV
+    3_CC_CC_CC  = Track start marker, lower 28 bits = chip clock in Hz
+    1_00_RR_VV  = Write VV to register RR (0-15)
     2_WW_WW_WW  = Wait WWWWWW samples (at 44100 Hz)
     0_00_00_00  = End of track
     F_00_00_00  = End of playlist
 
 VGM commands consumed (file format spec 1.71):
-    0xA0 aa dd  AY-3-8910 write dd to register aa & 0x7F (clock at 0x74)
+    0xA0 aa dd  AY-3-8910 write dd to register aa (clock at header 0x74)
     0x61 nn nn  wait nn samples     0x62 wait 735   0x63 wait 882
-    0x70-0x7F   wait (n&0xF)+1      0x66 end of data
-Every other byte is skipped one at a time. A file plays once, to 0x66.
+    0x70-0x7F   wait (n&0xF)+1      0x80-0x8F wait n&0xF   0x66 end of data
+Every other command is skipped by its operand length. Writes to the second
+chip of a dual-chip file (aa bit 7) and to registers above 15 are skipped
+and counted. A file plays once, to 0x66.
+
+Header check: the x8910 is the GI AY-3-8910. A file whose AY type (0x78,
+version 1.51 and later) is not an AY-3-8910, AY-3-8912 or AY-3-8913 (0x00,
+0x01, 0x02), such as the AY8930 or the YM2149 family, is skipped with the
+reason. Before version 1.51 the type is taken as the AY-3-8910.
+
+The playlist must fit the bench's MAX_CMDS (262144 words); a longer one
+stops with an error.
 """
 
 import sys
@@ -36,45 +45,68 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SIM_DIR    = os.path.dirname(SCRIPT_DIR)
 VGM_DIR    = os.path.join(SIM_DIR, "output", "vgm")
 HEX_DIR    = os.path.join(SIM_DIR, "output", "vgm_hex")
+MAX_CMDS   = 262144                       # tb_x8910_vgm.v playlist size
+AY_TYPES   = {0x00: "AY-3-8910", 0x01: "AY-3-8912", 0x02: "AY-3-8913"}
+
+
+def operand_len(cmd, data, pos, version):
+    """Bytes after the command byte, per the VGM 1.71 specification."""
+    if 0x30 <= cmd <= 0x3F or cmd in (0x4F, 0x50, 0x94):
+        return 1
+    if 0x40 <= cmd <= 0x4E:
+        return 2 if version >= 0x160 else 1
+    if 0x51 <= cmd <= 0x5F or 0xA0 <= cmd <= 0xBF or cmd == 0x61:
+        return 2
+    if cmd == 0x64 or 0xC0 <= cmd <= 0xDF:
+        return 3
+    if 0xE0 <= cmd <= 0xFF or cmd in (0x90, 0x91, 0x95):
+        return 4
+    if cmd == 0x92:
+        return 5
+    if cmd == 0x93:
+        return 10
+    if cmd == 0x68:
+        return 11
+    if cmd == 0x67:                      # data block: 0x66 tt ss(4) + data
+        return 6 + (struct.unpack_from('<I', data, pos + 3)[0] & 0x7FFFFFFF)
+    return 0
+
+
+def variant_problem(data, version):
+    """Why the header describes a part the x8910 does not model, or None."""
+    if version >= 0x151 and len(data) > 0x78:
+        ay_type = data[0x78]
+        if ay_type not in AY_TYPES:
+            return "AY type 0x%02X" % ay_type
+    return None
 
 
 def parse_vgm(data):
-    """Parse VGM data, return (ay_clock, commands) where commands is list of
-    (type, reg, val, wait) tuples."""
+    """Parse VGM data, return (ay_clock, commands, skipped writes)."""
     version = struct.unpack_from('<I', data, 0x08)[0]
     data_offset = struct.unpack_from('<I', data, 0x34)[0] + 0x34 if version >= 0x150 else 0x40
 
-    ay_clock_raw = struct.unpack_from('<I', data, 0x74)[0]
-    ay_clock = ay_clock_raw & 0x3FFFFFFF
-
-    # Loop info
-    loop_offset_raw = struct.unpack_from('<I', data, 0x1C)[0]
-    has_loop = loop_offset_raw != 0
-    loop_abs = (0x1C + loop_offset_raw) if has_loop else 0
+    # AY-3-8910 clock at offset 0x74; bit 30 marks a second chip
+    ay_clock = struct.unpack_from('<I', data, 0x74)[0] & 0x3FFFFFFF
 
     commands = []
     pos = data_offset
     pending_wait = 0
-    seen_loop_point = False
+    skipped = 0
 
     while pos < len(data):
-        if has_loop and pos == loop_abs and seen_loop_point:
-            if pending_wait > 0:
-                commands.append(('wait', 0, 0, pending_wait))
-            break
-        if has_loop and pos == loop_abs and not seen_loop_point:
-            seen_loop_point = True
-
         cmd = data[pos]
 
         if cmd == 0xA0:
-            reg = data[pos + 1] & 0x7F
-            val = data[pos + 2]
+            aa, val = data[pos + 1], data[pos + 2]
+            pos += 3
+            if aa & 0x80 or aa > 0x0F:
+                skipped += 1
+                continue
             if pending_wait > 0:
                 commands.append(('wait', 0, 0, pending_wait))
                 pending_wait = 0
-            commands.append(('write', reg, val, 0))
-            pos += 3
+            commands.append(('write', aa, val, 0))
         elif cmd == 0x61:
             pending_wait += struct.unpack_from('<H', data, pos + 1)[0]
             pos += 3
@@ -85,49 +117,46 @@ def parse_vgm(data):
             pending_wait += 882
             pos += 1
         elif 0x70 <= cmd <= 0x7F:
-            pending_wait += (cmd - 0x6F)
+            pending_wait += (cmd & 0x0F) + 1
+            pos += 1
+        elif 0x80 <= cmd <= 0x8F:
+            pending_wait += cmd & 0x0F
             pos += 1
         elif cmd == 0x66:
             if pending_wait > 0:
                 commands.append(('wait', 0, 0, pending_wait))
             break
         else:
-            pos += 1
+            pos += 1 + operand_len(cmd, data, pos, version)
 
-    return ay_clock, commands
+    return ay_clock, commands, skipped
 
 
 def main():
-    vgm_dir = VGM_DIR
-    hex_dir = HEX_DIR
-    playlist_file = os.path.join(hex_dir, "playlist.hex")
-    tracklist_file = os.path.join(hex_dir, "tracklist.txt")
+    playlist_file = os.path.join(HEX_DIR, "playlist.hex")
+    tracklist_file = os.path.join(HEX_DIR, "tracklist.txt")
 
-    os.makedirs(hex_dir, exist_ok=True)
+    os.makedirs(HEX_DIR, exist_ok=True)
 
-    vgz_files = sorted(glob.glob(os.path.join(vgm_dir, "*.vgz")))
-    vgm_files = sorted(glob.glob(os.path.join(vgm_dir, "*.vgm")))
+    vgz_files = sorted(glob.glob(os.path.join(VGM_DIR, "*.vgz")))
+    vgm_files = sorted(glob.glob(os.path.join(VGM_DIR, "*.vgm")))
     all_files = sorted(vgz_files + vgm_files)
 
     if not all_files:
-        print(f"No VGZ/VGM files found in {vgm_dir}/")
+        print(f"No VGZ/VGM files found in {VGM_DIR}/")
         sys.exit(1)
 
-    print(f"Found {len(all_files)} tracks in {vgm_dir}/\n")
+    print(f"Found {len(all_files)} file(s) in {VGM_DIR}/\n")
 
     total_commands = 0
     track_entries = []
 
     with open(playlist_file, 'w') as pf:
-        for track_num, filepath in enumerate(all_files, 1):
+        for filepath in all_files:
             filename = os.path.basename(filepath)
-
-            # Strip number prefix and extension for clean name
             name_base = os.path.splitext(filename)[0]
-            # Convert to lowercase with underscores for wav naming
             clean_name = name_base.lower().replace(' ', '_')
 
-            # Load VGZ or VGM
             try:
                 with gzip.open(filepath, 'rb') as f:
                     data = f.read()
@@ -139,47 +168,57 @@ def main():
                 print(f"  Skipping {filename} (not a valid VGM file)")
                 continue
 
-            ay_clock, commands = parse_vgm(data)
+            version = struct.unpack_from('<I', data, 0x08)[0]
+            problem = variant_problem(data, version)
+            if problem:
+                print(f"  Skipping {filename} (not an AY-3-8910: {problem})")
+                continue
+
+            ay_clock, commands, skipped = parse_vgm(data)
             total_writes = sum(1 for c in commands if c[0] == 'write')
             total_wait = sum(c[3] for c in commands if c[0] == 'wait')
             duration = total_wait / 44100
 
-            # Track start marker: 3_CC_CC_CC
-            # Lower 24 bits = CEN ticks per sample (AY_CLOCK / 44100)
-            cen_per_sample = ay_clock // 44100
-            marker = (3 << 28) | (cen_per_sample & 0x0FFFFFFF)
+            if total_writes == 0 or ay_clock == 0:
+                print(f"  Skipping {filename} (no AY-3-8910 data)")
+                continue
+
+            track_num = len(track_entries) + 1
+
+            marker = (3 << 28) | (ay_clock & 0x0FFFFFFF)
             pf.write(f"{marker:08X}\n")
 
-            # Write commands
             for cmd_type, reg, val, wait in commands:
                 if cmd_type == 'write':
-                    word = (1 << 28) | (reg << 16) | val
+                    word = (1 << 28) | (reg << 8) | val
                     pf.write(f"{word:08X}\n")
                 elif cmd_type == 'wait':
                     word = (2 << 28) | (wait & 0x0FFFFFFF)
                     pf.write(f"{word:08X}\n")
 
-            # End of track
             pf.write("00000000\n")
 
             num_cmds = total_writes + sum(1 for c in commands if c[0] == 'wait') + 2
             total_commands += num_cmds
             track_entries.append((track_num, clean_name, duration, ay_clock))
 
+            note = f", {skipped} second-chip or unknown writes skipped" if skipped else ""
             print(f"  [{track_num:02d}] {filename:40s} {duration:6.2f}s  "
-                  f"(clock={ay_clock:,} Hz, writes={total_writes})")
+                  f"(clock={ay_clock:,} Hz, writes={total_writes}{note})")
 
-        # End of playlist
         pf.write("F0000000\n")
         total_commands += 1
 
-    # Write tracklist index
+    if total_commands > MAX_CMDS:
+        sys.exit(f"Playlist has {total_commands:,} words, more than the bench's "
+                 f"{MAX_CMDS:,}; split the VGM files into smaller batches")
+
     with open(tracklist_file, 'w') as tf:
         for track_num, name, duration, clock in track_entries:
             tf.write(f"{track_num:02d} {name} {duration:.2f} {clock}\n")
 
     print(f"\nPlaylist: {playlist_file} ({total_commands:,} commands)")
-    print(f"Tracklist: {tracklist_file} ({len(track_entries)} tracks)")
+    print(f"Tracklist: {tracklist_file} ({len(track_entries)} track(s))")
     print(f"Total duration: {sum(e[2] for e in track_entries):.1f} seconds")
 
 

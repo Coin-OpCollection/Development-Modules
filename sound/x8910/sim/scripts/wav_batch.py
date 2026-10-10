@@ -6,11 +6,11 @@ files.
 Usage:
     python sim/scripts/wav_batch.py          (run from the x8910 IP root)
 
-Reads track_NN.raw files from sim/output/wav/, uses
-sim/output/vgm_hex/tracklist.txt to map track numbers to song names, and
-writes named 8-bit mono WAV files. Raw files are deleted after successful
-conversion. The last FADE_LEN samples are faded to 128, the WAV center, to
-prevent an end-of-file pop.
+Reads track_NN.raw files from sim/output/wav/ (16-bit little-endian
+samples, AOUT x 8), uses sim/output/vgm_hex/tracklist.txt to map track
+numbers to song names, and writes named 16-bit mono WAV files. Raw files are
+deleted after successful conversion. No fade is applied: each track ends
+with the bench's drain, every amplitude 0, at the IP's silence of 0.
 """
 
 import wave
@@ -23,7 +23,6 @@ SIM_DIR     = os.path.dirname(SCRIPT_DIR)
 WAV_DIR     = os.path.join(SIM_DIR, "output", "wav")
 TRACKLIST   = os.path.join(SIM_DIR, "output", "vgm_hex", "tracklist.txt")
 SAMPLE_RATE = 44100
-FADE_LEN    = 512
 
 
 def load_tracklist():
@@ -69,22 +68,15 @@ def main():
 
         wav_file = os.path.join(WAV_DIR, wav_name)
 
-        raw_data = bytearray(open(raw_file, "rb").read())
-        num_samples = len(raw_data)
+        raw_data = open(raw_file, "rb").read()
+        num_samples = len(raw_data) // 2
         duration = num_samples / SAMPLE_RATE
-
-        # Fade last samples to WAV center (128) to avoid pop
-        fade = min(FADE_LEN, num_samples)
-        for i in range(fade):
-            idx = num_samples - fade + i
-            t = i / fade
-            raw_data[idx] = int(raw_data[idx] * (1.0 - t) + 128 * t)
 
         with wave.open(wav_file, "w") as wav:
             wav.setnchannels(1)
-            wav.setsampwidth(1)
+            wav.setsampwidth(2)
             wav.setframerate(SAMPLE_RATE)
-            wav.writeframes(bytes(raw_data))
+            wav.writeframes(raw_data[:num_samples * 2])
 
         # Remove raw file after successful conversion
         os.remove(raw_file)
