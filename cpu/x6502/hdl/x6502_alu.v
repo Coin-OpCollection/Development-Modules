@@ -15,17 +15,20 @@
 //============================================================================
 //  Purely combinational 8-bit arithmetic logic unit for the NMOS 6502.
 //
-//  The ALU receives two 8-bit operands (a, b), a 4-bit operation select,
-//  and the current processor status register P. It produces an 8-bit
-//  result and the updated P flags. Flag behaviour follows the NMOS 6502
-//  silicon, including binary-coded-decimal (BCD) operation when the D
-//  flag is set during ADC and SBC.
+//  Operations:
+//    - Logical (ORA, AND, EOR, BIT), arithmetic (ADC, SBC, CMP), shift
+//      and rotate (ASL, LSR, ROL, ROR), increment and decrement (INC,
+//      DEC), and the pass-through ops EQ1 (no flags) and EQ2 (N and Z).
+//    - Undocumented immediate group: ANC, ALR, ARR, SBX, and ANE / LXA
+//      with the constant $EE.
 //
-//  Supported operations include logical (ORA, AND, EOR, BIT), arithmetic
-//  (ADC, SBC, CMP), shift and rotate (ASL, LSR, ROL, ROR), and increment
-//  and decrement (INC, DEC). Pass-through ops (EQ1, EQ2) move data
-//  without ALU work; EQ1 leaves flags unchanged for stores, EQ2 updates
-//  N and Z for loads and transfers.
+//  Flags:
+//    - ADC and SBC in decimal mode (D = 1) correct each nibble; Z is the
+//      binary result's, N and V come from the corrected low nibble and
+//      the binary high nibble (ADC) or from the binary result (SBC).
+//    - CMP and SBX ignore D and the carry in.
+//    - ARR in decimal mode takes N from the carry in, Z and V before the
+//      nibble corrections, and C from the high-nibble correction.
 //
 //  Reference: MOS Technology MCS6500 Microcomputer Family Hardware Manual,
 //             January 1976
@@ -39,7 +42,7 @@ module x6502_alu (
     input  wire [7:0] b,    // BusB: memory data input
 
     // Control Interface
-    input  wire [3:0] op,   // ALU operation select
+    input  wire [4:0] op,   // ALU operation select
     input  wire [7:0] p_in, // Processor status register input
 
     // Result Interface
@@ -49,25 +52,30 @@ module x6502_alu (
 
 //------------------------------------------------------------------------
 // ALU Operation Codes:
-// 4-bit encoding holds 15 distinct operations. The CPU state machine
-// drives op based on the decoded opcode.
+// 5-bit encoding. The CPU state machine drives op based on the decoded
+// opcode.
 //------------------------------------------------------------------------
-localparam [3:0]
-    ALU_OR  = 4'h0, // a | b
-    ALU_AND = 4'h1, // a & b
-    ALU_EOR = 4'h2, // a ^ b
-    ALU_ADC = 4'h3, // a + b + C, binary or BCD per D flag
-    ALU_EQ1 = 4'h4, // pass a, leave flags unchanged (stores, branches)
-    ALU_EQ2 = 4'h5, // pass a, update N and Z (loads, transfers)
-    ALU_CMP = 4'h6, // a - b, update N, Z, C only
-    ALU_SBC = 4'h7, // a - b - !C, binary or BCD per D flag
-    ALU_ASL = 4'h8, // shift left, bit 7 -> C
-    ALU_ROL = 4'h9, // rotate left through C
-    ALU_LSR = 4'hA, // shift right, bit 0 -> C
-    ALU_ROR = 4'hB, // rotate right through C
-    ALU_BIT = 4'hC, // a & b, N from b[7], V from b[6], Z from (a & b)
-    ALU_DEC = 4'hD, // a - 1
-    ALU_INC = 4'hE; // a + 1
+localparam [4:0]
+    ALU_OR  = 5'h00, // a | b
+    ALU_AND = 5'h01, // a & b
+    ALU_EOR = 5'h02, // a ^ b
+    ALU_ADC = 5'h03, // a + b + C, binary or BCD per D flag
+    ALU_EQ1 = 5'h04, // pass a, leave flags unchanged
+    ALU_EQ2 = 5'h05, // pass a, update N and Z
+    ALU_CMP = 5'h06, // a - b, update N, Z, C only
+    ALU_SBC = 5'h07, // a - b - !C, binary or BCD per D flag
+    ALU_ASL = 5'h08, // shift left, bit 7 -> C
+    ALU_ROL = 5'h09, // rotate left through C
+    ALU_LSR = 5'h0A, // shift right, bit 0 -> C
+    ALU_ROR = 5'h0B, // rotate right through C
+    ALU_BIT = 5'h0C, // a & b, N from b[7], V from b[6], Z from (a & b)
+    ALU_DEC = 5'h0D, // a - 1
+    ALU_INC = 5'h0E, // a + 1
+    ALU_ANC = 5'h0F, // a & b, C from result bit 7
+    ALU_ALR = 5'h10, // (a & b) >> 1, C from bit 0 of a & b
+    ALU_ARR = 5'h11, // (a & b) rotated right through C, own flags
+    ALU_SBX = 5'h12, // a - b in binary, C as CMP
+    ALU_ANE = 5'h13; // (a | $EE) & b
 
 //------------------------------------------------------------------------
 // Processor Status Register Layout:
@@ -76,8 +84,8 @@ localparam [3:0]
 //   1 : Z  zero
 //   2 : I  interrupt mask
 //   3 : D  decimal
-//   4 : B  break (only meaningful when pushed to stack)
-//   5 : 1  always reads as 1 on NMOS
+//   4 : B  (only in a pushed copy of P)
+//   5 : 1  (only in a pushed copy of P)
 //   6 : V  overflow
 //   7 : N  negative
 //------------------------------------------------------------------------
@@ -91,12 +99,16 @@ localparam FLAG_V = 6;
 localparam FLAG_N = 7;
 
 //------------------------------------------------------------------------
+// ANE / LXA Constant:
+// The value ORed into A before the AND with the operand.
+//------------------------------------------------------------------------
+localparam [7:0] ANE_K = 8'hEE;
+
+//------------------------------------------------------------------------
 // ADC Pre-compute Registers:
 // Half-adders per nibble produce binary intermediates that the BCD
 // adjustment step refines when D=1. C reflects the post-adjust carry.
-// N and V come from the binary intermediate, which matches NMOS
-// behaviour where these flags are not meaningful in decimal mode but
-// are still produced by the silicon.
+// N and V come from the intermediate after the low-nibble adjust.
 //------------------------------------------------------------------------
 reg [6:0] adc_al;   // low nibble half-add (carry, 4 data bits, alignment)
 reg [6:0] adc_ah;   // high nibble half-add
@@ -121,6 +133,19 @@ reg        sbc_c;
 reg        sbc_v;
 reg        sbc_n;
 reg  [7:0] sbc_q;
+
+//------------------------------------------------------------------------
+// Undocumented Immediate Group Registers:
+// ARR works on a & b with its own decimal corrections; SBX subtracts
+// in binary.
+//------------------------------------------------------------------------
+reg  [7:0] arr_t;
+reg  [7:0] arr_q;
+reg        arr_n;
+reg        arr_z;
+reg        arr_v;
+reg        arr_c;
+wire [8:0] sbx_d = {1'b0, a} - {1'b0, b};
 
 //------------------------------------------------------------------------
 // Op Mux Working Register:
@@ -153,7 +178,7 @@ always @(*) begin
     // High nibble half-add using the mid-carry
     adc_ah = {1'b0, a[7:4], adc_cmid} + {1'b0, b[7:4], 1'b1};
 
-    // N and V from the binary high nibble (NMOS decimal-mode behaviour)
+    // N and V from the high nibble before its decimal adjust
     adc_n = adc_ah[4];
     adc_v = (adc_ah[4] ^ a[7]) & ~(a[7] ^ b[7]);
 
@@ -198,13 +223,46 @@ always @(*) begin
 end
 
 //========================================================================
+// ARR Path:
+// Rotates a & b right through C. In binary mode C is bit 7 of a & b and
+// V is bit 6 XOR bit 5 of the result. In decimal mode N is the carry
+// in, Z and V (bit 6 of result XOR a & b) are taken before the nibble
+// corrections, and C is set by the high-nibble correction.
+//========================================================================
+always @(*) begin
+    arr_t = a & b;
+    arr_q = {p_in[FLAG_C], arr_t[7:1]};
+    arr_n = arr_q[7];
+    arr_z = (arr_q == 8'h00);
+
+    if(p_in[FLAG_D]) begin
+        arr_n = p_in[FLAG_C];
+        arr_v = arr_q[6] ^ arr_t[6];
+
+        // Low nibble: add 6 when (t & 0F) + (t & 01) > 5
+        if(({1'b0, arr_t[3:0]} + {4'b0000, arr_t[0]}) > 5'd5)
+            arr_q[3:0] = arr_q[3:0] + 4'd6;
+
+        // High nibble: add 6 and set C when (t & F0) + (t & 10) > 50
+        if(({1'b0, arr_t[7:4]} + {4'b0000, arr_t[4]}) > 5'd5) begin
+            arr_q[7:4] = arr_q[7:4] + 4'd6;
+            arr_c = 1'b1;
+        end else
+            arr_c = 1'b0;
+    end else begin
+        arr_v = arr_q[6] ^ arr_q[5];
+        arr_c = arr_t[7];
+    end
+end
+
+//========================================================================
 // Op Mux:
 // Selects the result and updates only the flag bits each instruction
-// is documented to touch. Unchanged bits pass through from p_in. ADC,
-// SBC, and CMP take N and Z from the binary intermediate; BIT takes N
-// from memory bit 7 and Z from (a & b) == 0; EQ1 leaves all flags
-// alone; everything else updates N from result bit 7 and Z from result
-// equal to zero.
+// touches. Unchanged bits pass through from p_in. ADC, SBC, and CMP
+// take N and Z from the binary intermediate; BIT takes N from memory
+// bit 7 and Z from (a & b) == 0; ARR has its own N and Z; EQ1 leaves
+// all flags alone; everything else updates N from result bit 7 and Z
+// from result equal to zero.
 //========================================================================
 always @(*) begin
     op_q = a;
@@ -260,6 +318,29 @@ always @(*) begin
         ALU_DEC : op_q = a - 8'h01;
         ALU_INC : op_q = a + 8'h01;
 
+        ALU_ANC : begin
+            op_q = a & b;
+            p_out[FLAG_C] = a[7] & b[7];
+        end
+
+        ALU_ALR : begin
+            op_q = {1'b0, a[7:1] & b[7:1]};
+            p_out[FLAG_C] = a[0] & b[0];
+        end
+
+        ALU_ARR : begin
+            op_q = arr_q;
+            p_out[FLAG_V] = arr_v;
+            p_out[FLAG_C] = arr_c;
+        end
+
+        ALU_SBX : begin
+            op_q = sbx_d[7:0];
+            p_out[FLAG_C] = ~sbx_d[8];
+        end
+
+        ALU_ANE : op_q = (a | ANE_K) & b;
+
         // ALU_EQ1, ALU_EQ2: op_q remains a; flags handled below
         default : ;
     endcase
@@ -279,6 +360,11 @@ always @(*) begin
         ALU_BIT : begin
             p_out[FLAG_N] = b[7];
             p_out[FLAG_Z] = ((a & b) == 8'h00);
+        end
+
+        ALU_ARR : begin
+            p_out[FLAG_N] = arr_n;
+            p_out[FLAG_Z] = arr_z;
         end
 
         ALU_EQ1 : begin
