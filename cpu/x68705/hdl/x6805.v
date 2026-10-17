@@ -45,12 +45,13 @@
 //
 //  Cycle Timing:
 //    HMOS = 0 gives the M146805 CMOS cycle counts of the User's Manual
-//    opcode map. HMOS = 1 gives the M6805 HMOS counts of the same map and
+//    opcode map [p.247]-[p.249]. HMOS = 1 gives the M6805 HMOS counts of the same map and
 //    of the MC68705P3/P5 data sheets, the family the MC68705 belongs to:
 //    after the opcode decode the state machine holds for the number of
 //    machine cycles by which the HMOS count exceeds the CMOS count (0-5).
 //    The hardware interrupt entry holds for 1 or 2, for the 10-cycle CMOS
-//    and 11-cycle HMOS sequences of Appendix G, Tables G1 and G2.
+//    and 11-cycle HMOS sequences of Appendix G, Tables G1 and G2
+//    [p.234], [p.239].
 //
 //  State Machine Design:
 //    The CPU uses a multi-cycle state machine where each state represents
@@ -63,7 +64,7 @@
 //============================================================================
 
 module x6805 #(
-    parameter HMOS = 0
+    parameter HMOS = 1
 )(
     input  wire        clk,
     input  wire        rst,
@@ -411,9 +412,10 @@ wire [3:0] op_lo = opcode[3:0]; // Low nibble determines operation
 //=========================================================================
 // Cycle Holds:
 // Machine cycles by which the M6805 HMOS count exceeds the M146805 CMOS
-// count, per opcode (User's Manual opcode map, HMOS/CMOS columns), and
-// the hold that brings the hardware interrupt entry to 10 CMOS or 11
-// HMOS cycles (Appendix G, Tables G1 and G2).
+// count, per opcode (User's Manual opcode map, HMOS/CMOS columns,
+// [p.247]-[p.249]), and the hold that brings the hardware interrupt entry
+// to 10 CMOS or 11 HMOS cycles (Appendix G, Tables G1 and G2, [p.234],
+// [p.239]).
 //=========================================================================
 localparam [2:0] INT_HOLD = HMOS ? 3'd2 : 3'd1;
 
@@ -448,7 +450,7 @@ reg [2:0] hold_cnt; // Remaining hold cycles
 // INT is synchronized outside the core and latched here on its falling
 // edge (irq rising). The latch holds the request, masked or not, until the
 // external interrupt is taken; BIL and BIH read the pin level (MC68705P5
-// data sheet, Interrupts).
+// data sheet, Interrupts [p.3-860]).
 //=========================================================================
 reg irq_prev;
 reg irq_latch;
@@ -615,7 +617,7 @@ always @(posedge clk) begin
                 // Check for pending interrupts before instruction decode.
                 // Interrupts only serviced when I flag is clear.
                 // The latched external interrupt has priority over the
-                // timer (MC68705P5 data sheet, Interrupts).
+                // timer (MC68705P5 data sheet, Interrupts [p.3-860]).
                 //-----------------------------------------------------
                 if(!cc_i && (tirq || irq_latch)) begin
                     // Hardware interrupt pending and enabled
@@ -830,6 +832,9 @@ always @(posedge clk) begin
                         //-----------------------------------------------------
                         // 8x: Control Instructions (Section 12, 13) - 1 byte
                         // RTI ($80), RTS ($81), SWI ($83), STOP ($8E), WAIT ($8F)
+                        // STOP and WAIT are M146805 CMOS only [p.219], [p.222];
+                        // with HMOS = 1 $8E and $8F are undefined, as on the
+                        // MC68705P3/P5
                         //-----------------------------------------------------
                         4'h8: begin
                             addr_mode <= AM_INH;
@@ -837,8 +842,8 @@ always @(posedge clk) begin
                                 4'h0: op_type <= OP_RTI;
                                 4'h1: op_type <= OP_RTS;
                                 4'h3: op_type <= OP_SWI;
-                                4'hE: op_type <= OP_STOP;
-                                4'hF: op_type <= OP_WAIT;
+                                4'hE: op_type <= HMOS ? OP_ILL : OP_STOP;
+                                4'hF: op_type <= HMOS ? OP_ILL : OP_WAIT;
                                 default: op_type <= OP_ILL;
                             endcase
                             state <= ST_EXECUTE;
@@ -1402,7 +1407,7 @@ always @(posedge clk) begin
                                 reg_a <= 8'h00;
                                 cc_n <= 1'b0;
                                 cc_z <= 1'b1;
-                                cc_c <= 1'b0;
+                                // C not affected by CLR [p.186]
                             end
 
                             default: ;
@@ -1451,7 +1456,6 @@ always @(posedge clk) begin
                                 reg_x <= 8'h00;
                                 cc_n <= 1'b0;
                                 cc_z <= 1'b1;
-                                cc_c <= 1'b0;
                             end
 
                             default: ;

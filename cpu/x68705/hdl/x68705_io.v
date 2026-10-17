@@ -20,7 +20,7 @@
 //  Each port has a Data Register for read/write and a Data Direction
 //  Register (DDR) that configures pins as input (0) or output (1).
 //
-//  Port characteristics per MC68705P3 datasheet:
+//  Port characteristics per the MC68705P3 / P5 data sheets [p.3-862]:
 //    Port A - Internal pull-ups (~10k), sinks 1.6mA, drives CMOS/1 TTL
 //    Port B - True high-Z, sinks 10mA (LED) or 3.2mA, needs pull-ups
 //    Port C - True high-Z (4-bit), sinks 1.6mA, needs pull-ups
@@ -33,8 +33,8 @@
 //    $01 - Port B Data Register (read/write)
 //    $02 - Port C Data Register (bits 3:0, upper bits read as 1)
 //    $03 - Reserved (reads as $FF)
-//    $04 - Port A DDR (write-only, reads as $FF on real hardware)
-//    $05 - Port B DDR (write-only, reads as $FF on real hardware)
+//    $04 - Port A DDR (write-only, reads as $FF [p.3-855])
+//    $05 - Port B DDR (write-only, reads as $FF [p.3-855])
 //    $06 - Port C DDR (bits 3:0, write-only)
 //============================================================================
 

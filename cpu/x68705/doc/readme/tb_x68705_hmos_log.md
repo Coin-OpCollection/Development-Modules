@@ -1,6 +1,6 @@
 # x68705 Regression Log, HMOS Counts
 
-Full output of the `tb_x68705` testbench with `HMOS = 1`, checked against the HMOS cycle counts (175 tests across 19 sections). See [README.md](../../README.md#design-verification) for the section-by-section description.
+Full output of the `tb_x68705` testbench with `HMOS = 1`, checked against the HMOS cycle counts (177 tests across 19 sections). See [README.md](../../README.md#design-verification) for the section-by-section description.
 
 ```
 =============================================================
@@ -26,6 +26,7 @@ PASS: SEI timing = 2 cycles
 PASS: SEI: I = 1 = 00000001
 PASS: RSP timing = 2 cycles
 PASS: RSP: SP = $3F = 0000003f
+PASS: $8F: WAIT (CMOS) / undefined = 00000001
 
 === SECTION 2: Accumulator RMW Instructions ===
 
@@ -36,7 +37,7 @@ PASS: DECA timing = 4 cycles
 PASS: DECA: A = $00 = 00000000
 PASS: DECA: Z = 1 = 00000001
 PASS: CLRA timing = 4 cycles
-PASS: CLRA: A = $00 = 00000000
+PASS: CLRA: A = $00, NZC = 011 = 00000003
 PASS: COMA timing = 4 cycles
 PASS: COMA: A = $AA = 000000aa
 PASS: NEGA timing = 4 cycles
@@ -64,7 +65,7 @@ PASS: INCX: X = $FF = 000000ff
 PASS: DECX timing = 4 cycles
 PASS: DECX: X = $00 = 00000000
 PASS: CLRX timing = 4 cycles
-PASS: CLRX: X = $00 = 00000000
+PASS: CLRX: X = $00, NZC = 011 = 00000003
 
 === SECTION 4: Immediate Addressing Mode ===
 
@@ -100,6 +101,7 @@ PASS: LDA ext timing = 5 cycles
 PASS: LDA $0150: A = $CD = 000000cd
 PASS: STA ext timing = 6 cycles
 PASS: STA $0040: RAM = $EF = 000000ef
+PASS: LDA $0840 wraps to RAM $040 = 0000003c
 
 === SECTION 7: Indexed Addressing Modes ===
 
@@ -244,8 +246,8 @@ PASS: Stack: $5F untouched = 000000a5
 =============================================================
   MC68705P3/P5 Comprehensive Test Results
 =============================================================
-  Total Tests:  175
-  Passed:       175
+  Total Tests:  177
+  Passed:       177
   Failed:       0
 =============================================================
   *** ALL TESTS PASSED ***

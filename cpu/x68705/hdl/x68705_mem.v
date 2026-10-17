@@ -18,7 +18,7 @@
 //  Implements 112 bytes of internal RAM and generates chip selects for all
 //  memory-mapped peripherals. The MC68705P3 uses a 2KB address space
 //  ($000-$7FF) with Von Neumann architecture where program, data, and I/O
-//  share the same address map.
+//  share the same address map [p.3-855].
 //
 //  The stack occupies the upper portion of RAM ($60-$7F, 32 bytes max).
 //  Stack pointer resets to $7F and builds downward on push operations.
@@ -30,7 +30,9 @@
 //  Memory Map:
 //    $000-$007  I/O Registers (Port A/B/C data and DDRs)
 //    $008-$009  Timer Registers (TDR, TCR)
-//    $00A-$00F  Reserved (reads as $FF)
+//    $00A       Reserved (reads as $FF)
+//    $00B       PCR, EPROM programming (not modeled, reads as $FF)
+//    $00C-$00F  Reserved (reads as $FF)
 //    $010-$07F  Internal RAM (112 bytes, stack at $60-$7F)
 //    $080-$783  User EPROM (1796 bytes)
 //    $784       Mask Option Register (MOR)
@@ -79,11 +81,15 @@ localparam [12:0] ROM_START   = 13'h0080; // $80+
 // Chip Select Generation:
 // Active chip select signals route CPU bus transactions to the
 // appropriate peripheral or memory. Only one select active at a time.
+// The MC68705 address space is 11 bits [p.3-856], so the decode uses
+// addr[10:0] and an address above $7FF wraps.
 //------------------------------------------------------------------------
-assign io_cs = (addr >= IO_START) && (addr <= IO_END);
-assign timer_cs = (addr >= TIMER_START) && (addr <= TIMER_END);
-wire   ram_cs = (addr >= RAM_START) && (addr <= RAM_END);
-assign rom_cs = (addr >= ROM_START);
+wire [12:0] maddr = {2'b00, addr[10:0]};
+
+assign io_cs = (maddr >= IO_START) && (maddr <= IO_END);
+assign timer_cs = (maddr >= TIMER_START) && (maddr <= TIMER_END);
+wire   ram_cs = (maddr >= RAM_START) && (maddr <= RAM_END);
+assign rom_cs = (maddr >= ROM_START);
 
 //------------------------------------------------------------------------
 // ROM Address:

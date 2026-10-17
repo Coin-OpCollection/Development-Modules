@@ -17,7 +17,7 @@ The **x6502** is a fully synchronous, instruction and bus-cycle accurate Verilog
 <small>
 
 - **Fully Synchronous Design**: All state changes occur on the positive edge of `clk` when `cen` is active. RES, RDY, IRQ and NMI are sampled at `cen` only. No latches or asynchronous logic.
-- **Bus-Cycle Accurate**: Every read, write, dummy access, stack access and vector fetch appears on the external bus on the cycle the NMOS 6502 drives it, including the dummy reads of indexed, branch and read-modify-write cycles. Verified pin by pin against the NMOS 6502 netlist.
+- **Bus-Cycle Accurate**: Every read, write, dummy access, stack access and vector fetch appears on the external bus on the cycle the NMOS 6502 drives it, including the dummy reads of indexed, branch and read-modify-write cycles. Verified pin by pin against the NMOS 6502 netlist, except in the reset window (see [Reset](#reset)).
 - **Half-Cycle Mode**: With `HALF_CYCLE = 1`, a second enable (`cen_p2`) marks phase 2 of each cycle, so the data bus drive window (`dout_oe`) and the SO sample point match the silicon within the cycle.
 - **Complete Instruction Set**: All 256 opcodes: the 151 documented instructions across 13 addressing modes and the 105 undocumented opcodes, with their full bus patterns and the 12 JAM opcodes.
 - **Authentic NMOS Behavior**: JMP indirect page-wrap, NMOS decimal-mode flags, the reset sequence as a BRK with writes inhibited (S - 3, registers kept), interrupt recognition at the last cycle, the branch interrupt delay, CLI / SEI / PLP latency and NMI takeover of a BRK or IRQ entry.
@@ -569,7 +569,7 @@ Per-test output: [tb_x6502](doc/readme/tb_x6502_log.md)
 
 ### External Validation
 
-Beyond the testbench, x6502 was run against published 6502 test suites and against the transistor-level netlist of the NMOS 6502. Where a suite and the netlist disagree, the netlist is followed:
+Beyond the testbench, x6502 was run against published 6502 test suites and against the transistor-level netlist of the NMOS 6502. The suites and the netlist carry their own licenses, so their harnesses are not part of this package; the netlist-recorded scenarios the testbench needs ship in `sim/tb_x6502_ops.hex`. Where a suite and the netlist disagree, the netlist is followed:
 
 | Suite | Result |
 |-------|--------|

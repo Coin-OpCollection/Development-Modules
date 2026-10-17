@@ -42,7 +42,7 @@ The **x8910** is a fully synchronous Verilog implementation of the General Instr
 | 8 | [Device Usage](#device-usage) | FPGA resource usage, timing and Fmax of a standalone compile on two Cyclone V parts |
 | 9 | [Implementation Notes](#implementation-notes) | Sources of the undocumented behavior and where the implementation and the GI documents differ |
 | 10 | [Project Structure](#project-structure) | Directory tree of the IP package |
-| 11 | [Design Verification](#design-verification) | Testbench section breakdown, run command, ModelSim screenshot, final summary box. Per-test log: [tb_x8910](doc/readme/tb_x8910_log.md). |
+| 11 | [Design Verification](#design-verification) | Testbench section breakdown, run command, ModelSim screenshot, final summary box. Per-test log: [tb_x8910](doc/readme/tb_x8910_log.md); VGM log: [tb_x8910_vgm](doc/readme/tb_x8910_vgm_log.md). |
 | 12 | [VGM Playback](#vgm-playback) | VGM playback testbench and the VGM-to-WAV toolchain |
 | 13 | [Design References](#design-references) | GI documents, the die schematic and the VGM specification |
 | 14 | [License](#license) | Creative Commons Attribution-NonCommercial 4.0 International |
@@ -366,7 +366,8 @@ x8910/
 │   ├── 02_AY-3-8910_RE_Schematic.pdf
 │   ├── 03_AY-3-8910_RE_Schematic_Sheet.pdf
 │   └── readme/
-│       └── tb_x8910_log.md          # Full regression log
+│       ├── tb_x8910_log.md          # Full regression log
+│       └── tb_x8910_vgm_log.md      # VGM playback testbench output
 ├── hdl/
 │   ├── x8910.v                      # Top level: registers, mixer, D/A, output sum
 │   ├── x8910_tone.v                 # Tone generator
@@ -444,6 +445,8 @@ A VGM playback testbench is included for validating the chip against real game a
     </td>
   </tr>
 </table>
+
+Output of a sample run: [tb_x8910_vgm](doc/readme/tb_x8910_vgm_log.md)
 
 ### Usage
 

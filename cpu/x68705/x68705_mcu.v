@@ -43,7 +43,7 @@
 //============================================================================
 
 module x68705_mcu #(
-    parameter HMOS = 0
+    parameter HMOS = 1
 )(
     input  wire        clk,
     input  wire        rst,
@@ -113,7 +113,7 @@ end
 //   - 112 bytes internal RAM with stack at $60-$7F
 //   - Three parallel I/O ports (A, B, C)
 //   - 8-bit timer with 7-bit prescaler
-// The MOR value controls timer behavior per MC68705P3 datasheet.
+// The MOR value controls timer behavior [p.3-860], [p.3-866].
 //------------------------------------------------------------------------
 x68705 #(
     .HMOS ( HMOS )

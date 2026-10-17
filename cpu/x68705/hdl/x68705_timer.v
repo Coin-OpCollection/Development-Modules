@@ -23,7 +23,7 @@
 //
 //  The prescaler divides the input clock by 1, 2, 4, 8, 16, 32, 64, or 128
 //  based on TCR[2:0]. Writing 1 to TCR[3] clears the prescaler for
-//  truncation-free counting.
+//  truncation-free counting [p.3-858].
 //
 //  Timer input modes (TCR[5:4]):
 //    00 - Internal clock: one count per machine cycle (cen), the phi2
@@ -47,7 +47,7 @@
 //    $08 - TDR (Timer Data Register) - 8-bit down counter, read/write
 //    $09 - TCR (Timer Control Register) - control and status
 //
-//  TCR Bit Definitions:
+//  TCR Bit Definitions [p.3-865]:
 //    [7] TIR - Timer Interrupt Request (set on underflow, write 0 to clear)
 //    [6] TIM - Timer Interrupt Mask (1=masked, 0=enabled)
 //    [5] TIN - Timer Input Select (0=internal, 1=external)
@@ -172,7 +172,7 @@ wire [7:0] next_tdr = tdr - 8'd1;
 //------------------------------------------------------------------------
 always @(posedge clk) begin
     if(rst) begin
-        // Reset state per datasheet
+        // Reset state [p.3-858]
         tdr <= 8'hFF; // Counter = $FF
         tcr <= {2'b01, mor[5:4], 1'b0, mor[2:0]}; // TIM=1, TIR=0, rest from MOR
         prescaler <= 7'h7F; // Prescaler = $7F

@@ -18,7 +18,7 @@ The **x68705** is a fully synchronous, cycle-accurate Verilog implementation of 
 
 - **Fully Synchronous Design**: All state changes occur on the positive edge of `clk` when `cen` is active. No latches or asynchronous logic.
 - **Cycle-Accurate Timing**: Instruction timing matches the M6805/M146805 User's Manual opcode map: the HMOS counts of the MC68705P3/P5 with `HMOS = 1`, the M146805 CMOS counts with `HMOS = 0`.
-- **Complete Instruction Set**: All 62 unique operations (202 valid opcodes) implemented across 10 addressing modes.
+- **Complete Instruction Set**: All 62 unique operations (207 valid opcodes) implemented across 10 addressing modes.
 - **Integrated Peripherals**: I/O ports, timer/counter, and internal RAM included.
 - **M6805 Family Compatible**: Core architecture shared across the M6805 family.
 - **Timing Constraints**: The IP ships an SDC file that relaxes its `cen`-paced paths from one setting in the core SDC. See [Timing Constraints](#timing-constraints).
@@ -104,13 +104,15 @@ $008-$009   Timer Registers
   $008      TDR - Timer Data Register (8-bit counter)
   $009      TCR - Timer Control Register
 
-$00A-$00F   Reserved (reads as $FF)
+$00A        Reserved (reads as $FF)
+$00B        PCR - Programming Control Register (EPROM programming; not modeled, reads as $FF)
+$00C-$00F   Reserved (reads as $FF)
 
 $010-$07F   Internal RAM (112 bytes)
   $010-$05F   General purpose (80 bytes)
   $060-$07F   Stack area (32 bytes, builds downward)
 
-$080-$783   User EPROM (1804 bytes)
+$080-$783   User EPROM (1796 bytes; 1804 with the vectors)
 $784        Mask Option Register (MOR)
 $785-$7F7   Bootstrap ROM (115 bytes)
 
@@ -168,7 +170,7 @@ Counts are machine cycles, written HMOS/CMOS. `HMOS = 1` gives the M6805 HMOS co
 
 In HMOS mode the state machine holds, right after the opcode decode, for the number of machine cycles by which the HMOS count exceeds the CMOS count, 0 to 5, so every bus access keeps its position relative to the end of the instruction. The timer keeps counting through the hold.
 
-**CMOS compatibility:** `HMOS = 0` is the default and keeps the timing of earlier x68705 releases for every opcode. The one change is the hardware interrupt entry (external and timer), which now takes the 10 cycles of Appendix G Table G1; earlier releases took 9.
+**Default:** `HMOS = 1`, the MC68705P3/P5 timing, is the default. `HMOS = 0` keeps the timing of x68705 releases before HMOS support for every opcode, except the hardware interrupt entry (external and timer), which takes the 10 cycles of Appendix G Table G1; those releases took 9.
 
 #### Register/Memory Operations
 
@@ -235,7 +237,7 @@ In HMOS mode the state machine holds, right after the opcode decode, for the num
 | STOP | 1 | -/2 | Stop oscillator |
 | WAIT | 1 | -/2 | Wait for interrupt |
 
-*STOP and WAIT are M146805 CMOS instructions, implemented here for M6805 family compatibility. The MC68705P3 and MC68705P5 do not have them.*
+*STOP and WAIT are M146805 CMOS instructions and decode only with `HMOS = 0`. The MC68705P3 and MC68705P5 do not have them; with `HMOS = 1`, $8E and $8F are undefined opcodes.*
 
 #### Jump and Subroutine Instructions
 
@@ -366,6 +368,11 @@ output wire        rom_cs    // ROM chip select
 
 The internal clock is phi2, the machine cycle: the prescaler counts once per `cen` pulse, or once per rising edge of the TIMER pin in external mode. At reset TCR bits 0-2, 4 and 5 are loaded from the MOR, TIR is cleared and TIM is set. With MOR TOPT = 1 (mask-option emulation) the prescaler select and the clock source come from the MOR and TIE is held at 1, so the TIMER pin gates the internal clock (tie it high for an ungated clock); writes to TCR[5:0] and PSC have no effect, and TCR[5:0] read as 1s.
 
+Where the MC68705P5 data sheet contradicts itself, x68705 follows one reading:
+
+- **PSC**: writing 1 clears the prescaler to 0 [p.3-858]. The same page also says the write sets it to all 1s.
+- **DDR reads**: a DDR reads as $FF, per the data sheet's caution [p.3-855]. Its I/O port description calls a DDR read undefined [p.3-863].
+
 ### Mask Option Register (MOR)
 
 ```
@@ -417,7 +424,7 @@ x68705_mcu #(
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `HMOS` | 0 | 1 = M6805 HMOS cycle counts (MC68705P3/P5), 0 = M146805 CMOS cycle counts |
+| `HMOS` | 1 | 1 = M6805 HMOS cycle counts (MC68705P3/P5), 0 = M146805 CMOS cycle counts and STOP / WAIT |
 
 ### RAM Customization
 
@@ -558,6 +565,7 @@ The testbench (`tb_x68705.v`) provides comprehensive verification across 19 sect
 - **Interrupt Handling**: IRQ edge latch and masked requests, TIRQ, SWI, IRQ before TIRQ
 - **Peripheral Access**: I/O ports with DDR reads, timer registers, the timer count rate in every input mode, TCR from the MOR at reset, MOR controlled mode
 - **Stack**: $60-$7F with the wrap below $60
+- **Address Space**: an extended address above $7FF wraps to 11 bits; $8F is WAIT with `HMOS = 0` and undefined with `HMOS = 1`
 
 </small>
 
@@ -567,7 +575,7 @@ vsim -c tb_x68705 -do "run -all"             # CMOS counts
 vsim -c -gHMOS=1 tb_x68705 -do "run -all"    # HMOS counts
 ```
 
-Both modes pass all 175 tests.
+Both modes pass all 177 tests.
 
 The cycle testbench (`tb_x68705_cycles.v`) runs each of the 207 defined opcodes and the /INT entry and checks the machine-cycle count of each against the opcode map: 208 checks, all passing, in both modes.
 
@@ -589,8 +597,8 @@ vsim -c -gHMOS=0 tb_x68705_cycles -do "run -all"  # CMOS counts
 =============================================================
   MC68705P3/P5 Comprehensive Test Results
 =============================================================
-  Total Tests:  175
-  Passed:       175
+  Total Tests:  177
+  Passed:       177
   Failed:       0
 =============================================================
   *** ALL TESTS PASSED ***
@@ -602,8 +610,8 @@ vsim -c -gHMOS=0 tb_x68705_cycles -do "run -all"  # CMOS counts
 =============================================================
   MC68705P3/P5 Comprehensive Test Results
 =============================================================
-  Total Tests:  175
-  Passed:       175
+  Total Tests:  177
+  Passed:       177
   Failed:       0
 =============================================================
   *** ALL TESTS PASSED ***

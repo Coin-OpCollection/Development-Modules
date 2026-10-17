@@ -10,7 +10,7 @@
 
 ## x65c02 Overview
 
-The **x65c02** is a fully synchronous, instruction and bus-cycle accurate Verilog implementation of the Rockwell R65C02 8-bit CMOS microprocessor. The design is implemented as an explicit per-cycle finite state machine without microcode. Every opcode, the reset sequence, interrupt recognition, RDY and SO follow the Rockwell R65C02 datasheet and, where the datasheet gives no bus cycle, bus recordings of a real R65C02P2, against which the design is verified cycle by cycle. The R65C02 is the Rockwell variant of the 6502 family, extending the NMOS 6502 instruction set with the CMOS additions and the Rockwell bit-manipulation group (RMB / SMB / BBR / BBS).
+The **x65c02** is a fully synchronous, instruction and bus-cycle accurate Verilog implementation of the Rockwell R65C02 8-bit CMOS microprocessor. The design is implemented as an explicit per-cycle finite state machine without microcode. Every opcode, the reset sequence, interrupt recognition, RDY and SO follow the Rockwell R65C02 datasheet and bus recordings of a real R65C02P2, the recordings taking precedence where the two differ in a bus cycle, and the design is verified against the recordings cycle by cycle. The R65C02 is the Rockwell variant of the 6502 family, extending the NMOS 6502 instruction set with the CMOS additions and the Rockwell bit-manipulation group (RMB / SMB / BBR / BBS).
 
 Sources of behavior, in this order:
 

@@ -47,7 +47,7 @@
 //============================================================================
 
 module x68705 #(
-    parameter HMOS = 0
+    parameter HMOS = 1
 )(
     input  wire        clk,
     input  wire        rst,

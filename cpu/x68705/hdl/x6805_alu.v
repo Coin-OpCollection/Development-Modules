@@ -189,7 +189,7 @@ always @(*) begin
         end
 
         ALU_CLR: begin
-            // CLR: Result is 0, N=0, Z=1, C not affected
+            // CLR: Result is 0, N=0, Z=1, C not affected [p.186]
             result = 8'h00;
             cout = cin;           // C not affected
             hout = hin;           // H not affected

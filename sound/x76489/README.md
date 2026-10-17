@@ -435,7 +435,7 @@ WAV files are written to `sim/output/wav/` with names derived from the source VG
   <small><i>(TIM 9919 Architecture, Figure 6; Sound Generation; Test Set Error Tables)</i></small>
 - [VGM File Format Specification 1.71](https://vgmrips.net/wiki/VGM_Specification)<br>
   <small><i>(Header offset 0x0C, command 0x50)</i></small>
-- [TI SN76489AN Die Schematic](https://github.com/ika-musume/IKA76489/blob/main/SN76489.pdf)<br>
+- [TI SN76489AN Die Schematic](doc/05_TI_SN76489AN_RE_Schematic.pdf)<br>
   <small><i>(TONE: the period of 0; NOISE: the register length, taps, seed and periodic mode; DATA WRITE CONTROL: the write timer, READY and the register strobe on every byte)</i></small>
 
 ## License

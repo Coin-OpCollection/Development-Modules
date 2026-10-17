@@ -31,7 +31,9 @@
 //      nibble corrections, and C from the high-nibble correction.
 //
 //  Reference: MOS Technology MCS6500 Microcomputer Family Hardware Manual,
-//             January 1976
+//             January 1976. The manual does not give the decimal-mode
+//             N, V and Z or the undocumented group; those follow the
+//             transistor-level netlist of the NMOS 6502 die.
 //============================================================================
 
 `timescale 1ns/1ps

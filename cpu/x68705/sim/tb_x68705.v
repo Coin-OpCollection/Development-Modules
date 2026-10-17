@@ -458,6 +458,13 @@ initial begin
     check_timing(cycle_count, 2, "RSP timing");
     check(uut.u_cpu.reg_sp, 6'h3F, "RSP: SP = $3F");
 
+    // $8F - WAIT on the M146805 CMOS (clears I); with HMOS = 1 an
+    // undefined opcode, as on the MC68705P3/P5, and I is kept
+    rom[11'h100] = 8'h8F;
+    setup_test(13'h0100);
+    run_instruction();
+    check(uut.u_cpu.cc_i, HMOS ? 1'b1 : 1'b0, "$8F: WAIT (CMOS) / undefined");
+
     //=====================================================================
     // SECTION 2: Accumulator RMW Instructions
     // 1-byte instructions, 3 cycles. Read-modify-write operations on
@@ -486,12 +493,16 @@ initial begin
     check(uut.u_cpu.cc_z, 1'b1, "DECA: Z = 1");
 
     // CLRA ($4F) - Clear A, 3 cycles
-    rom[11'h100] = 8'h4F;
+    // SEC first: CLRA clears N, sets Z, leaves C set
+    rom[11'h100] = 8'h99;
+    rom[11'h101] = 8'h4F;
     setup_test(13'h0100);
     uut.u_cpu.reg_a = 8'hFF;
+    uut.u_cpu.cc_n = 1'b1;
+    run_instruction();
     run_instruction_timed(cycle_count);
     check_timing(cycle_count, 3, "CLRA timing");
-    check(uut.u_cpu.reg_a, 8'h00, "CLRA: A = $00");
+    check({uut.u_cpu.reg_a, uut.u_cpu.cc_n, uut.u_cpu.cc_z, uut.u_cpu.cc_c}, {8'h00, 3'b011}, "CLRA: A = $00, NZC = 011");
 
     // COMA ($43) - Complement A (one's complement), 3 cycles
     rom[11'h100] = 8'h43;
@@ -591,12 +602,16 @@ initial begin
     check(uut.u_cpu.reg_x, 8'h00, "DECX: X = $00");
 
     // CLRX ($5F) - Clear X, 3 cycles
-    rom[11'h100] = 8'h5F;
+    // SEC first: CLRX clears N, sets Z, leaves C set
+    rom[11'h100] = 8'h99;
+    rom[11'h101] = 8'h5F;
     setup_test(13'h0100);
     uut.u_cpu.reg_x = 8'hAB;
+    uut.u_cpu.cc_n = 1'b1;
+    run_instruction();
     run_instruction_timed(cycle_count);
     check_timing(cycle_count, 3, "CLRX timing");
-    check(uut.u_cpu.reg_x, 8'h00, "CLRX: X = $00");
+    check({uut.u_cpu.reg_x, uut.u_cpu.cc_n, uut.u_cpu.cc_z, uut.u_cpu.cc_c}, {8'h00, 3'b011}, "CLRX: X = $00, NZC = 011");
 
     //=====================================================================
     // SECTION 4: Immediate Addressing Mode
@@ -737,6 +752,15 @@ initial begin
     run_instruction_timed(cycle_count);
     check_timing(cycle_count, 5, "STA ext timing");
     check(uut.u_mem.ram[8'h30], 8'hEF, "STA $0040: RAM = $EF");
+
+    // LDA ext above $7FF: the 11-bit address space wraps, $0840 is RAM $040
+    rom[11'h100] = 8'hC6;
+    rom[11'h101] = 8'h08;
+    rom[11'h102] = 8'h40;              // -> $0840, wraps to $040
+    setup_test(13'h0100);
+    uut.u_mem.ram[8'h30] = 8'h3C;
+    run_instruction();
+    check(uut.u_cpu.reg_a, 8'h3C, "LDA $0840 wraps to RAM $040");
 
     //=====================================================================
     // SECTION 7: Indexed Addressing Modes
