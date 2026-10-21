@@ -32,7 +32,7 @@ The **x6502** is a fully synchronous, instruction and bus-cycle accurate Verilog
 
 | # | Section | Description |
 |---|---------|-------------|
-| 1 | [System Architecture](#system-architecture) | Top-level block diagram of the CPU, ALU, and external bus interface |
+| 1 | [System Architecture](#system-architecture) | Top-level block diagram of the CPU, ALU, and external bus interface; the 6502 die |
 | 2 | [Module Hierarchy](#module-hierarchy) | Source-file listing with each module's role and approximate line count |
 | 3 | [Memory Map](#memory-map) | Architectural fixed addresses: zero page, stack page, and the NMI / Reset / IRQ-BRK vectors |
 | 4 | [Register Set](#register-set) | Programmer-visible registers (A / X / Y / PC / S / P) and the processor-status flag layout |
@@ -43,7 +43,7 @@ The **x6502** is a fully synchronous, instruction and bus-cycle accurate Verilog
 | 9 | [6502 Family Roadmap](#6502-family-roadmap) | Position of x6502 in the 6502 / R65C02 / HuC6280 IP family |
 | 10 | [Project Structure](#project-structure) | Directory tree of the IP package |
 | 11 | [Design Verification](#design-verification) | Testbench section breakdown, run command, ModelSim screenshot, final summary box, and external validation against test suites and the netlist. Per-test log: [tb_x6502](doc/readme/tb_x6502_log.md). |
-| 12 | [Design References](#design-references) | Hardware manual and die netlist used as the implementation reference |
+| 12 | [Design References](#design-references) | Hardware manual and the die material used as the implementation reference |
 | 13 | [License](#license) | Creative Commons Attribution-NonCommercial 4.0 International |
 | 14 | [Support](#support) | Back ongoing Coin-Op Collection FPGA core development on Patreon |
 
@@ -79,6 +79,29 @@ The **x6502** is a fully synchronous, instruction and bus-cycle accurate Verilog
 │  └───────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### 6502 Die
+
+Three views of the 6502 die show the floorplan of the blocks the HDL cites as [DIE x0-x1, y0-y1], every layer traced from the photograph, and the traced circuitry colored by the block it belongs to. Click an image for the full size.
+
+<table align="center">
+  <tr>
+    <td align="center" style="padding: 10px;">
+      <a href="img/x6502_die_floorplan.jpg"><img src="img/x6502_die_floorplan.jpg" width="250"></a>
+    </td>
+    <td align="center" style="padding: 10px;">
+      <a href="img/x6502_die_layers.jpg"><img src="img/x6502_die_layers.jpg" width="250"></a>
+    </td>
+    <td align="center" style="padding: 10px;">
+      <a href="img/x6502_die_areas.jpg"><img src="img/x6502_die_areas.jpg" width="250"></a>
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><b>Block Floorplan</b></td>
+    <td align="center"><b>Extracted Layers</b></td>
+    <td align="center"><b>Circuitry by Block</b></td>
+  </tr>
+</table>
 
 ## Module Hierarchy
 
@@ -585,7 +608,8 @@ Beyond the testbench, x6502 was run against published 6502 test suites and again
 
 - [MOS Technology MCS6500 Microcomputer Family Hardware Manual, January 1976](doc/00_MOS_Technology_MCS6500_Hardware_Manual_Jan1976.pdf)<br>
   <small><i>(System Timing, pp. 28-30; Interrupts, pp. 36-40; RDY, RES, IRQ and NMI, pp. 50-53; Pins and SYNC, pp. 55-58; Summary of Single Cycle Execution, pp. 168-180)</i></small>
-- [Visual6502: NMOS 6502 Netlist](https://github.com/trebonian/visual6502)
+- [Visual6502: NMOS 6502 Netlist and Layer Data, ©2010 Greg James, Brian Silverman, Barry Silverman, CC BY-NC-SA 3.0](https://github.com/trebonian/visual6502)
+- [Visual6502: NMOS 6502 Die Photograph](http://visual6502.org/images/6502/index.html)
 
 ## License
 

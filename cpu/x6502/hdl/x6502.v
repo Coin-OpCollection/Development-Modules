@@ -99,6 +99,8 @@
 //  Reference: MOS Technology MCS6500 Microcomputer Family Hardware Manual,
 //             January 1976, Sections 1 and 3 [p.028]-[p.058] and
 //             Appendix A [p.168]-[p.180].
+//
+//             6502 die photograph, cited as [DIE x0-x1, y0-y1].
 //============================================================================
 
 `timescale 1ns/1ps
@@ -278,6 +280,10 @@ localparam FLAG_N = 7;
 // CPU Registers:
 // Power-up values: A = X = Y = S = 00, D = 0, I = 1; the first reset
 // leaves S = FD.
+// Y [DIE 930-968, 3040-4408], X [DIE 1021-1059, 3040-4408],
+// S [DIE 1159-1218, 3030-4427], A [DIE 2368-2410, 3004-4348],
+// PCH [DIE 2646-2775, 3032-4454], PCL [DIE 3136-3260, 2949-4380],
+// P [DIE 3495-4045, 2341-2646].
 //========================================================================
 reg  [7:0] reg_a  = 8'h00;    // Accumulator
 reg  [7:0] reg_x  = 8'h00;    // X index
@@ -293,6 +299,7 @@ reg  [5:0] state  = ST_RES_LOW;
 //========================================================================
 // Addressing Scratch:
 // Effective address halves, data latch and per-instruction flags.
+// Address bus register ABL [DIE 731-798, 3189-4249].
 //========================================================================
 reg [7:0] ad        = 8'h00; // Address low byte (operand, AL + index)
 reg [7:0] bah       = 8'h00; // Address high byte (AH, BH, branch target)
@@ -307,6 +314,7 @@ reg       shx_drop  = 1'b0;  // RDY held the SHA/SHX/SHY/TAS dummy read
 // Interrupt State:
 // nmig = NMI pending, nmil = NMI blocked until the line is high again,
 // intg = interrupt recognized for the next fetch.
+// Random control logic [DIE 372-4053, 1169-2619].
 //========================================================================
 reg nmig    = 1'b0;
 reg nmil    = 1'b0;
@@ -323,6 +331,7 @@ reg vec_x   = 1'b0; // RES still low: one more vector read follows
 // V Flag Timing:
 // SO edge pending for the next enable, and the second V load of ADC,
 // SBC, RRA, ISC, ARR and CLV one cycle after the instruction.
+// Random control logic [DIE 372-4053, 1169-2619].
 //========================================================================
 reg so_prev = 1'b1;
 reg so_pend = 1'b0;
@@ -335,6 +344,7 @@ reg v_val   = 1'b0;
 // one after it; res_rel = RES was high again at the start of this cycle;
 // res_h1 = RDY held that cycle as a repeat of the one before; rep = the
 // current cycle is a RDY repeat.
+// Random control logic [DIE 372-4053, 1169-2619].
 //========================================================================
 reg res_pend = 1'b0;
 reg res_r1   = 1'b0;
@@ -358,6 +368,8 @@ reg        nvp;
 //========================================================================
 // Opcode Decode:
 // Addressing mode and access kind from the opcode bit fields.
+// Instruction register and predecode [DIE 4146-4422, 567-1830],
+// decode ROM [DIE 396-4044, 581-1181].
 //========================================================================
 function [4:0] f_am;
     input [7:0] op;
@@ -506,6 +518,7 @@ wire [7:0] p_cur = {reg_p[7], v_cur, reg_p[5:0]};
 // prot = RES protocol cycle; hold = RDY repeats this read cycle (also the
 // cycle after RES was seen low); last = last cycle of an instruction;
 // run = the state machine advances.
+// Random control logic [DIE 372-4053, 1169-2619].
 //========================================================================
 reg last;
 
@@ -699,6 +712,7 @@ end
 //========================================================================
 // Read Result Destinations:
 // Registers written at the end of an immediate or memory read.
+// Data output register and input data latch [DIE 3525-3704, 2949-4388].
 //========================================================================
 reg rd_wa;
 reg rd_wx;
@@ -750,6 +764,7 @@ end
 // Main State Machine:
 // Every state change happens at cen. The case builds the next cycle's
 // bus values; RES, RDY and the interrupt poll act on them afterwards.
+// Decode ROM [DIE 396-4044, 581-1181].
 //========================================================================
 always @(posedge clk) begin
     if(cen) begin

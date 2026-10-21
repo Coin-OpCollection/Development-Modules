@@ -14,6 +14,7 @@
 
 //============================================================================
 //  Purely combinational 8-bit arithmetic logic unit for the NMOS 6502.
+//  ALU [DIE 1243-2088, 2960-4434].
 //
 //  Operations:
 //    - Logical (ORA, AND, EOR, BIT), arithmetic (ADC, SBC, CMP), shift
@@ -34,6 +35,8 @@
 //             January 1976. The manual does not give the decimal-mode
 //             N, V and Z or the undocumented group; those follow the
 //             transistor-level netlist of the NMOS 6502 die.
+//
+//             6502 die photograph, cited as [DIE x0-x1, y0-y1].
 //============================================================================
 
 `timescale 1ns/1ps
