@@ -1,0 +1,4 @@
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) capcom_cps_b_21.v]
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) hdl/capcom_dl0921.v]
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) hdl/capcom_dl0921_cells.v]
+set_global_assignment -name SDC_FILE [file join $::quartus(qip_path) hdl/sdc/capcom_dl0921.sdc]

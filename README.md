@@ -30,6 +30,13 @@ Verified Verilog IP modules for FPGA-based applications. Each module reproduces 
 | [x8910](sound/x8910/) | General&nbsp;Instrument&nbsp;AY&#8209;3&#8209;8910 | Programmable&nbsp;Sound&nbsp;Generator | Yes | In&#8209;Progress² | Complete² |
 | [x76489](sound/x76489/) | Texas&nbsp;Instruments&nbsp;SN76489AN | Digital&nbsp;Complex&nbsp;Sound&nbsp;Generator | Yes | In&#8209;Progress² | Complete² |
 
+### ASIC
+
+| Module | Device | Description | Die | Trace | Netlist |
+|--------|--------|-------------|-----|-------|---------|
+| [capcom_dl0311](asic/capcom_dl0311/) | CAPCOM&nbsp;DL&#8209;0311&nbsp;(CPS&#8209;A&#8209;01) | CPS1&nbsp;Video&nbsp;Controller:&nbsp;Scroll&nbsp;Layers,&nbsp;Sprites&nbsp;and&nbsp;Palette | Yes | Complete | Complete |
+| [capcom_dl0921](asic/capcom_dl0921/) | CAPCOM&nbsp;DL&#8209;0921&nbsp;(CPS&#8209;B&#8209;21) | CPS1&nbsp;Video&nbsp;Mixer:&nbsp;Layer&nbsp;Priority,&nbsp;Palette,&nbsp;Raster&nbsp;Interrupt,&nbsp;Multiplier&nbsp;and&nbsp;Configuration&nbsp;Key | Yes | Complete | Complete |
+
 <small>
 
 ¹ Built on the x6502 core.<br>
@@ -70,13 +77,11 @@ These modules are in development or final verification, and several already run 
 | x1425 | AT&T&nbsp;WE&nbsp;DSP16A | QSound&nbsp;DSP&nbsp;(CAPCOM&nbsp;DL&#8209;1425) | Yes | In&#8209;Progress | No |
 | xCUS30 | Namco&nbsp;CUS30 | Wave&nbsp;Sound&nbsp;Generator | Yes | In&#8209;Progress | No |
 
-### Graphics
+### ASIC
 
 | Module | Device | Description | Die | Trace | Netlist |
 |--------|--------|-------------|-----|-------|---------|
-| x6270 | Hudson&nbsp;Soft&nbsp;HuC6270 | Video&nbsp;Display&nbsp;Controller:&nbsp;Tile&nbsp;Background&nbsp;and&nbsp;Sprites | Yes | In&#8209;Progress | No |
-| capcom_dl0311 | CAPCOM&nbsp;DL&#8209;0311&nbsp;(CPS&#8209;A&#8209;01) | CPS1&nbsp;Video&nbsp;Controller:&nbsp;Scroll&nbsp;Layers,&nbsp;Sprites&nbsp;and&nbsp;Palette | Yes | Complete | Complete |
-| capcom_dl0921 | CAPCOM&nbsp;DL&#8209;0921&nbsp;(CPS&#8209;B&#8209;21) | CPS1&nbsp;Video&nbsp;Mixer:&nbsp;Layer&nbsp;Priority,&nbsp;Palette,&nbsp;Raster&nbsp;Interrupt,&nbsp;Multiplier&nbsp;and&nbsp;Configuration&nbsp;Key | Yes | In&#8209;Progress | No |
+| TBD | Hudson&nbsp;Soft&nbsp;HuC6270 | Video&nbsp;Display&nbsp;Controller:&nbsp;Tile&nbsp;Background&nbsp;and&nbsp;Sprites | Yes | In&#8209;Progress | No |
 | TBD | Data&nbsp;East&nbsp;DECO&nbsp;52 | Sprite&nbsp;Generator | Yes | In&#8209;Progress | No |
 | TBD | Data&nbsp;East&nbsp;DECO&nbsp;55 | Tile&nbsp;Generator&nbsp;with&nbsp;Row&nbsp;and&nbsp;Column&nbsp;Scroll | Yes | In&#8209;Progress | No |
 | TBD | Data&nbsp;East&nbsp;DECO&nbsp;56 | Tile&nbsp;Generator&nbsp;with&nbsp;Row&nbsp;and&nbsp;Column&nbsp;Scroll&nbsp;and&nbsp;On&#8209;Chip&nbsp;Decryption | Yes | In&#8209;Progress | No |
